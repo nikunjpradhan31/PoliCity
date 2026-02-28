@@ -1,13 +1,20 @@
 """
 API routes for PoliCity API.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 import joblib
 import os
 
-from app.models import MessageResponse, User
+from app.models import (
+    MessageResponse, 
+    User,
+    InfrastructureReportRequest,
+    InfrastructureReportResponse,
+    ReportStatusResponse,
+    IncidentDetailResponse
+)
 from app.db import get_database, get_collection
 from app.workflows.infrastructure import workflow
 
@@ -165,47 +172,6 @@ async def get_issues_by_bounds(
 from datetime import datetime
 from fastapi import BackgroundTasks
 
-class InfrastructureReportRequest(BaseModel):
-    incident_id: Optional[str] = Field(None, description="Unique incident identifier. If provided and a prior run exists in MongoDB, saved results are returned without re-running agents")
-    issue_type: str = Field(..., description="Type of infrastructure issue")
-    location: str = Field(..., description="City and state")
-    fiscal_year: int = Field(..., description="Fiscal year for budget analysis")
-    image_url: Optional[str] = Field(None, description="Optional image URL for severity assessment")
-    image_base64: Optional[str] = Field(None, description="Optional base64-encoded image")
-    force_refresh: Optional[List[str]] = Field(None, description="List of agent names to re-run even if saved data exists")
-
-class InfrastructureReportResponse(BaseModel):
-    report_id: str
-    incident_id: Optional[str] = None
-    status: str
-    progress: int
-    cache_hit: bool
-    agents_skipped: List[str]
-    result: Optional[dict] = None
-
-class ReportStatusResponse(BaseModel):
-    report_id: str
-    incident_id: Optional[str] = None
-    status: str
-    progress: int
-    current_agent: str
-    cache_hit: bool
-    agents_completed: List[str]
-    agents_skipped: List[str]
-    agents_failed: List[str]
-    result: Optional[dict] = None
-    error: Optional[str] = None
-
-class IncidentDetailResponse(BaseModel):
-    incident_id: str
-    status: str
-    inputs: dict
-    pipeline_run: dict
-    agent_outputs: dict
-    report_url: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-
 @router.post("/workflow/infrastructure-report", response_model=InfrastructureReportResponse)
 async def generate_infrastructure_report(request: InfrastructureReportRequest, background_tasks: BackgroundTasks):
     """
@@ -243,3 +209,26 @@ async def get_incident_details(incident_id: str):
         return details
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get incident: {str(e)}")
+
+import asyncio
+
+@router.websocket("/workflow/infrastructure-report/{report_id}/ws")
+async def websocket_endpoint(websocket: WebSocket, report_id: str):
+    await websocket.accept()
+    try:
+        while True:
+            # Poll status every 2 seconds and push to client
+            status = await workflow.get_status(report_id)
+            if status:
+                await websocket.send_json(status)
+                if status.get("status") in ["complete", "failed"]:
+                    break
+            else:
+                await websocket.send_json({"error": "Report not found"})
+                break
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        print(f"Client disconnected from report {report_id}")
+    except Exception as e:
+        await websocket.close(code=1011, reason=str(e))
+

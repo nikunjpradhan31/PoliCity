@@ -2,10 +2,11 @@
 
 ## Overview
 
-This document defines an enhanced 7-agent pipeline for generating public infrastructure repair reports. Each agent is a distinct FastAPI service component with defined inputs, outputs, and responsibilities. Each stage must utilize Gemini's API LLMs for `gemini-3-flash-preview`.
+This document defines a streamlined 2-agent pipeline for generating public infrastructure repair reports. Each agent is a distinct FastAPI service component with defined inputs, outputs, and responsibilities. Both agents utilize Gemini's API LLMs for `gemini-3-flash-preview`.
 
 When an `incident_id` is provided, each agent's output is persisted to MongoDB as it completes. If the same `incident_id` is submitted again, the orchestrator loads all previously saved agent outputs from MongoDB and skips re-execution for any step that already has a stored result — only running agents whose data is missing or explicitly marked for refresh.
 
+Do not generate or hardcode fake or generated data, use the Gemini API to prompt for the agent.
 ---
 
 ## User Inputs
@@ -27,24 +28,12 @@ When an `incident_id` is provided, each agent's output is persisted to MongoDB a
 flowchart TD
     A[User Input + incident_id] --> Z{incident_id exists\nin MongoDB?}
     Z -- Yes --> Y[Load saved agent\noutputs from MongoDB]
-    Y --> H[Report Generator]
-    Z -- No --> B[Planner Agent]
-    B --> C[Cost Research Agent]
-    B --> D[Budget Analyzer Agent]
-    C --> E[Repair Plan Agent]
-    C --> F[Contractor Finder Agent]
-    D --> G[Validation/QA Agent]
-    E --> G
-    F --> G
-    B -- save --> DB[(MongoDB)]
-    C -- save --> DB
-    D -- save --> DB
-    E -- save --> DB
-    F -- save --> DB
-    G -- save --> DB
-    G --> H[Report Generator]
-    H -- save --> DB
-    H --> I[Final Report]
+    Y --> B2[Report Generator Agent]
+    Z -- No --> B1[Thinking Agent]
+    B1 -- save --> DB[(MongoDB)]
+    B1 --> B2[Report Generator Agent]
+    B2 -- save --> DB
+    B2 --> I[Final Report]
 
     subgraph External Sources
         J[Web Scraping]
@@ -55,31 +44,16 @@ flowchart TD
         O[Federal Grant Databases]
     end
 
-    C --> J
-    F --> L
-    F --> N
-    D --> K
-    B --> M
-    D --> O
+    B1 --> J
+    B1 --> K
+    B1 --> L
+    B1 --> M
+    B1 --> N
+    B1 --> O
 ```
 
 ---
 
-## Caching Layer
-
-Cost data and contractor listings do not need to be re-scraped on every run. A Redis or file-based cache with TTL rules should be applied across agents to prevent redundant external calls and reduce latency.
-
-| Data Type | Cache TTL |
-|-----------|-----------|
-| Material costs (Home Depot, Lowe's) | 30 days |
-| Contractor listings | 7 days |
-| Budget / open data figures | 14 days |
-| 311 complaint history | 3 days |
-| Geocoding results | 90 days |
-
-Cache keys should be scoped by `(location, issue_type, fiscal_year)` where applicable.
-
----
 
 ## MongoDB Persistence
 
@@ -87,7 +61,7 @@ Cache keys should be scoped by `(location, issue_type, fiscal_year)` where appli
 
 When an `incident_id` is present on a request, the orchestrator uses MongoDB as the source of truth for that incident's agent outputs. Each agent writes its result to a dedicated collection immediately upon completion. On subsequent requests for the same `incident_id`, the orchestrator checks each agent's collection for an existing document before deciding whether to run or skip that agent.
 
-This enables partial re-runs — for example, re-running only the Contractor Finder while reusing all other saved steps — as well as full recovery if a pipeline run is interrupted mid-way.
+This enables partial re-runs — for example, re-running only the Report Generator while reusing the saved Thinking Agent output — as well as full recovery if a pipeline run is interrupted mid-way.
 
 ---
 
@@ -98,13 +72,8 @@ This enables partial re-runs — for example, re-running only the Contractor Fin
 | Collection | Stores | Keyed By |
 |------------|--------|----------|
 | `incidents` | Top-level incident record and pipeline run status | `incident_id` |
-| `agent_planner` | Planner Agent output | `incident_id` |
-| `agent_cost_research` | Cost Research Agent output | `incident_id` |
-| `agent_repair_plan` | Repair Plan Agent output | `incident_id` |
-| `agent_contractor` | Contractor Finder Agent output | `incident_id` |
-| `agent_budget` | Budget Analyzer Agent output | `incident_id` |
-| `agent_validation` | Validation/QA Agent output | `incident_id` |
-| `agent_report` | Final Report Generator output | `incident_id` |
+| `agent_thinking` | Thinking Agent output | `incident_id` |
+| `agent_report` | Report Generator Agent output | `incident_id` |
 
 ---
 
@@ -129,11 +98,10 @@ This is the master record created when a new `incident_id` is first submitted. I
     "started_at": "2025-01-15T10:20:00Z",
     "completed_at": "2025-01-15T10:31:00Z",
     "total_duration_ms": 66000,
-    "agents_completed": ["planner", "cost_research", "budget", "repair_plan", "contractor", "validation", "report"],
+    "agents_completed": ["thinking", "report"],
     "agents_skipped": [],
     "agents_failed": []
-  },
-  "report_url": "https://reports.example.com/INC-20250115-CHI-001"
+  }
 }
 ```
 
@@ -147,19 +115,14 @@ Every agent collection follows the same document structure, wrapping the agent's
 {
   "_id": "INC-20250115-CHI-001",
   "incident_id": "INC-20250115-CHI-001",
-  "agent_id": "cost_research",
+  "agent_id": "thinking",
   "executed_at": "2025-01-15T10:23:00Z",
   "duration_ms": 3400,
   "model_used": "gemini-3-flash-preview",
   "tokens_used": 1820,
   "confidence": 0.82,
   "run_count": 1,
-  "data": {
-    "material_costs": [],
-    "labor_costs": [],
-    "time_estimates": [],
-    "total_cost_estimate": {}
-  }
+  "data": { }
 }
 ```
 
@@ -182,7 +145,7 @@ function run_pipeline(incident_id, inputs):
     mongo.incidents.insert_one({ incident_id, status: "running", inputs, created_at: now() })
 
   # Step 2 — For each agent, check if its step output already exists
-  for each agent_step in [planner, cost_research, budget, repair_plan, contractor, validation, report]:
+  for each agent_step in [thinking, report]:
 
     saved = mongo[agent_step.collection].find_one({ incident_id })
 
@@ -210,16 +173,16 @@ function run_pipeline(incident_id, inputs):
 
 ### Forced Refresh
 
-To force re-execution of a specific agent step (e.g., after contractor data goes stale), the request can include a `force_refresh` array:
+To force re-execution of a specific agent step, the request can include a `force_refresh` array:
 
 ```json
 {
   "incident_id": "INC-20250115-CHI-001",
-  "force_refresh": ["contractor", "budget"]
+  "force_refresh": ["thinking", "report"]
 }
 ```
 
-The orchestrator will delete the existing MongoDB documents for those agent collections and re-run only those steps, reusing all others as normal.
+The orchestrator will delete the existing MongoDB documents for those agent collections and re-run only those steps, reusing any others as normal.
 
 ---
 
@@ -229,11 +192,7 @@ The following indexes must be created at application startup:
 
 ```python
 # Unique index on incident_id for all collections
-for collection in [
-    "incidents", "agent_planner", "agent_cost_research",
-    "agent_repair_plan", "agent_contractor", "agent_budget",
-    "agent_validation", "agent_report"
-]:
+for collection in ["incidents", "agent_thinking", "agent_report"]:
     db[collection].create_index("incident_id", unique=True)
 
 # TTL index on incidents for auto-expiry (optional, e.g. 1 year)
@@ -246,7 +205,7 @@ Every agent output must be wrapped in a standard metadata envelope for observabi
 
 ```json
 {
-  "agent_id": "cost_research",
+  "agent_id": "thinking",
   "executed_at": "2025-01-15T10:28:00Z",
   "duration_ms": 3400,
   "model_used": "gemini-3-flash-preview",
@@ -263,7 +222,7 @@ Every agent output must be wrapped in a standard metadata envelope for observabi
 | `duration_ms` | Execution time in milliseconds |
 | `model_used` | Gemini model version used |
 | `tokens_used` | Token count for cost tracking |
-| `confidence` | 0.0–1.0 score for downstream QA validation |
+| `confidence` | 0.0–1.0 score for QA validation |
 | `data` | The agent's actual output payload |
 
 ---
@@ -274,7 +233,7 @@ If an agent returns a `confidence` score below `0.6`, the orchestrator should ap
 
 1. Retry the agent with alternate search queries (up to 2 retries)
 2. If confidence remains low after retries, proceed with a `low_confidence_disclaimer` flag set to `true` in the final report
-3. If an agent fails entirely, mark that section as `"status": "unavailable"` and continue pipeline execution — a partial report is more useful than a failed one
+3. If an agent fails entirely, mark all affected sections as `"status": "unavailable"` and continue — a partial report is more useful than a failed one
 
 ---
 
@@ -282,9 +241,9 @@ If an agent returns a `confidence` score below `0.6`, the orchestrator should ap
 
 ---
 
-### Agent 1: Planner Agent
+### Agent 1: Thinking Agent
 
-**Purpose:** Parse user input, infer issue severity, generate structured tasks, and produce search queries for downstream agents. If an image is provided, pass it to Gemini for multimodal severity assessment.
+**Purpose:** The Thinking Agent is a unified reasoning and data-gathering agent. It combines planning, cost research, repair planning, contractor discovery, and budget analysis into a single comprehensive pass. It parses user input, infers issue severity, geocodes the location, scrapes material and labor cost data, generates a phased repair plan, discovers and license-verifies local contractors, and analyzes the fiscal year budget along with applicable grant programs — all before handing off to the Report Generator.
 
 **Input:**
 - `issue_type`: string
@@ -296,17 +255,6 @@ If an agent returns a `confidence` score below `0.6`, the orchestrator should ap
 **Output:**
 ```json
 {
-  "search_queries": {
-    "cost_research": ["pothole repair cost Chicago 2025", "asphalt patching labor cost per square foot"],
-    "contractor_search": ["pothole repair contractors Chicago IL", "local paving companies Chicago"],
-    "budget_data": ["Chicago infrastructure budget 2025", "CDOT pavement repair allocation"]
-  },
-  "tasks_list": [
-    {"agent": "cost_research", "priority": 1},
-    {"agent": "budget_analyzer", "priority": 1},
-    {"agent": "contractor_finder", "priority": 2},
-    {"agent": "repair_plan", "priority": 2}
-  ],
   "parsed_issue": {
     "category": "pavement",
     "subtype": "pothole",
@@ -319,33 +267,12 @@ If an agent returns a `confidence` score below `0.6`, the orchestrator should ap
     "neighborhood": "Loop",
     "district": "Ward 42",
     "geocoder": "census"
-  }
-}
-```
-
-**Notes:**
-- Severity is inferred dynamically via Gemini (from image if provided, or from issue type heuristics) rather than hardcoded as `"medium"`
-- Urgency flags such as `near_school` or `near_hospital` adjust downstream task priorities
-- Geocoding converts the `location` string into coordinates using the Census geocoder or Google Maps API, enriching all downstream agents with geospatial context
-
-**External Data Sources:**
-- Google Maps API / Census Geocoder (coordinates and neighborhood)
-- Gemini multimodal API (optional image severity assessment)
-
----
-
-### Agent 2: Cost Research Agent
-
-**Purpose:** Research material, labor, and time costs for the specific issue type using web scraping. Web scrape websites like Lowe's, Home Depot, Menards, and other construction and home goods websites. Include historical cost benchmarks for year-over-year comparison.
-
-**Input:**
-- `search_queries`: list of strings
-- `issue_type`: string
-- `location`: string
-
-**Output:**
-```json
-{
+  },
+  "search_queries_used": {
+    "cost_research": ["pothole repair cost Chicago 2025", "asphalt patching labor cost per square foot"],
+    "contractor_search": ["pothole repair contractors Chicago IL", "local paving companies Chicago"],
+    "budget_data": ["Chicago infrastructure budget 2025", "CDOT pavement repair allocation"]
+  },
   "material_costs": [
     {"item": "Hot mix asphalt", "unit": "per ton", "cost_low": 85, "cost_high": 120, "source": "regional_aggregates"},
     {"item": "Cold patch asphalt", "unit": "per bag", "cost_low": 18, "cost_high": 35, "source": "home_depot"}
@@ -368,33 +295,6 @@ If an agent returns a `confidence` score below `0.6`, the orchestrator should ap
     "high": 450,
     "currency": "USD"
   },
-  "sources": [
-    {"url": "https://example.com/cost-guide", "accessed": "2025-01-15", "reliability": "high"}
-  ]
-}
-```
-
-**External Data Sources:**
-- Web scraping: Home Depot, Lowe's for material costs
-- Industry reports: Construction Cost Data
-- Municipal bid sheets for labor rates
-- Regional aggregate suppliers
-- City bid archives for historical benchmarks
-
----
-
-### Agent 3: Repair Plan Agent
-
-**Purpose:** Generate a general repair plan based on issue type and cost research.
-
-**Input:**
-- `issue_type`: string
-- `location`: string
-- `cost_estimates`: object from Agent 2
-
-**Output:**
-```json
-{
   "repair_phases": [
     {
       "phase": 1,
@@ -434,26 +334,7 @@ If an agent returns a `confidence` score below `0.6`, the orchestrator should ap
     {"method": "cold patch", "pros": "quick fix", "cons": "temporary", "best_for": "winter emergency repairs"}
   ],
   "permits_required": false,
-  "safety_considerations": ["traffic control", "PPE required", "utilities clearance"]
-}
-```
-
-**External Data Sources:** None (expert knowledge base)
-
----
-
-### Agent 4: Contractor Finder Agent
-
-**Purpose:** Find local businesses/contractors capable of performing the repair. Web scrape and use Gemini LLMs for searching local construction and contractor companies. Validate contractor licenses against state licensing portals before including results.
-
-**Input:**
-- `search_queries`: list of contractor search queries
-- `issue_type`: string
-- `location`: string
-
-**Output:**
-```json
-{
+  "safety_considerations": ["traffic control", "PPE required", "utilities clearance"],
   "contractors": [
     {
       "name": "Chicago Paving Co.",
@@ -472,38 +353,10 @@ If an agent returns a `confidence` score below `0.6`, the orchestrator should ap
       "source": "yellow_pages"
     }
   ],
-  "search_sources_used": ["yellow_pages", "yelp", "city_vendor_list"],
-  "filters_applied": ["licensed", "insured", "active_in_area"]
-}
-```
-
-**Notes:**
-- Before including any contractor in results, the agent must verify license status via the relevant state contractor license lookup portal (most states expose public REST APIs for this)
-- Contractors with expired, suspended, or unverifiable licenses must be excluded or flagged
-
-**External Data Sources:**
-- Yellow Pages / web scraping
-- Yelp business directory
-- City vendor / pre-qualified contractor lists
-- Better Business Bureau
-- State contractor license verification portals
-
----
-
-### Agent 5: Budget Analyzer Agent
-
-**Purpose:** Analyze the fiscal year budget for feasibility and allocation recommendations. Use Gemini LLM and web scraping to find and analyze allocations. Additionally, identify any federal or state grant programs the issue may qualify for.
-
-**Input:**
-- `fiscal_year`: integer
-- `location`: string
-- `cost_estimates`: object from Agent 2
-
-**Output:**
-```json
-{
-  "fiscal_year": 2025,
+  "contractor_search_sources_used": ["yellow_pages", "yelp", "city_vendor_list"],
+  "contractor_filters_applied": ["licensed", "insured", "active_in_area"],
   "budget_analysis": {
+    "fiscal_year": 2025,
     "total_infrastructure_budget": 150000000,
     "allocated_to_issue_type": 8500000,
     "remaining": 14150000,
@@ -530,7 +383,7 @@ If an agent returns a `confidence` score below `0.6`, the orchestrator should ap
       "source": "idot.illinois.gov"
     }
   ],
-  "recommendations": [
+  "budget_recommendations": [
     "Request allocation from FY2025 pavement maintenance fund",
     "Consider bundling with adjacent repairs for bulk discount",
     "Apply for RAISE grant to offset cost of large-scale repairs"
@@ -539,85 +392,52 @@ If an agent returns a `confidence` score below `0.6`, the orchestrator should ap
     {"option": "defer_to_next_fiscal_year", "reason": "not critical"},
     {"option": "request_emergency_allocation", "reason": "safety hazard"},
     {"option": "use_cold_patch_temporary", "cost_savings": "60%"}
+  ],
+  "sources": [
+    {"url": "https://example.com/cost-guide", "accessed": "2025-01-15", "reliability": "high"},
+    {"url": "https://data.cityofchicago.org/budget", "accessed": "2025-01-15", "reliability": "high"},
+    {"url": "https://grants.gov/search", "accessed": "2025-01-15", "reliability": "high"}
   ]
 }
 ```
 
+**Internal Processing Steps:**
+
+The Thinking Agent executes the following steps in sequence internally, driven by Gemini LLM reasoning:
+
+1. **Parse & Plan** — Interpret `issue_type`, infer severity via Gemini (using image if provided), apply urgency flags, generate all search queries for subsequent steps
+2. **Geocode** — Convert `location` to coordinates and enrich with neighborhood/district data via Census Geocoder or Google Maps API
+3. **Cost Research** — Web scrape Home Depot, Lowe's, Menards, and municipal bid archives for material and labor costs; collect historical benchmarks
+4. **Repair Plan** — Use Gemini to generate a phased repair plan with materials, durations, prerequisites, and safety considerations
+5. **Contractor Discovery** — Scrape Yellow Pages, Yelp, and city vendor lists; verify each contractor's license via state licensing portal before including in results
+6. **Budget Analysis** — Query the city open data portal and municipal budget documents; cross-reference with grants.gov and state DOT programs to identify applicable funding
+
 **Notes:**
+- Severity is inferred dynamically via Gemini (from image if provided, or from issue type heuristics) — never hardcoded
+- Urgency flags such as `near_school` or `near_hospital` are determined from geospatial enrichment and adjust response priority
+- Contractors with expired, suspended, or unverifiable licenses are excluded from results
+- Multi-jurisdiction locations (border cities, county vs. municipal) must branch the budget lookup across all relevant entities and merge results
 - The `grant_opportunities` section checks whether the issue type qualifies for IIJA, RAISE, or state DOT programs
-- Multi-jurisdiction locations (e.g., border cities, county vs. municipal) must be handled by branching the budget lookup across all relevant entities and merging results
 
 **External Data Sources:**
-- City Open Data Portal (budget data)
-- Municipal budget PDFs / documents
-- State transparency portals
+- Google Maps API / Census Geocoder (coordinates and neighborhood)
+- Gemini multimodal API (optional image severity assessment)
+- Web scraping: Home Depot, Lowe's, Menards (material costs)
+- Industry reports and municipal bid sheets (labor rates, historical benchmarks)
+- Yellow Pages, Yelp, city vendor lists (contractor discovery)
+- State contractor license verification portals
+- City Open Data Portal and municipal budget documents
 - grants.gov (federal grant database)
 - State DOT program listings
 
 ---
 
-### Agent 6: Validation / QA Agent *(New)*
+### Agent 2: Report Generator Agent
 
-**Purpose:** Cross-check all upstream agent outputs before report generation. Verify cost estimates are within realistic ranges, contractor data is not stale, budget figures match sourced documents, and flag any low-confidence or missing data sections.
-
-**Input:**
-- All outputs from Agents 1–5 (including agent metadata envelopes)
-
-**Output:**
-```json
-{
-  "validation_summary": {
-    "overall_status": "pass_with_warnings",
-    "agents_reviewed": 5,
-    "issues_found": 2
-  },
-  "checks": [
-    {
-      "agent": "cost_research",
-      "check": "cost_range_realistic",
-      "status": "pass",
-      "notes": "Estimates within expected range for Chicago metro area"
-    },
-    {
-      "agent": "contractor_finder",
-      "check": "license_verified",
-      "status": "warning",
-      "notes": "1 contractor could not be verified; excluded from final report"
-    },
-    {
-      "agent": "budget_analyzer",
-      "check": "budget_source_accessible",
-      "status": "pass",
-      "notes": "Chicago Open Data Portal responded successfully"
-    },
-    {
-      "agent": "cost_research",
-      "check": "data_freshness",
-      "status": "warning",
-      "notes": "Material cost data is 28 days old; approaching cache TTL"
-    }
-  ],
-  "low_confidence_sections": ["contractor_finder"],
-  "proceed_to_report": true
-}
-```
-
-**Validation Rules:**
-- Cost estimates must fall within ±50% of historical benchmarks; flag outliers
-- Contractor data older than 7 days triggers a freshness warning
-- Any agent with `confidence < 0.6` is flagged and its section marked with a disclaimer in the final report
-- Budget figures must be cross-referenced against at least one verifiable source URL
-
-**External Data Sources:** None (cross-references upstream agent outputs)
-
----
-
-### Agent 7: Report Generator Agent
-
-**Purpose:** Synthesize all agent outputs into a final structured report. Use Gemini LLM. Incorporate QA validation results and surface confidence/source transparency metadata.
+**Purpose:** Synthesize all Thinking Agent output into a final structured report. Use Gemini LLM to compose narrative sections. Surface source reliability metadata and apply a prominent disclaimer banner if `low_confidence_disclaimer` is `true`.
 
 **Input:**
-- All outputs from Agents 1–6
+- Full output from the Thinking Agent (including agent metadata envelope)
 
 **Output:**
 ```json
@@ -659,9 +479,10 @@ If an agent returns a `confidence` score below `0.6`, the orchestrator should ap
 **Notes:**
 - `report_url` provides a shareable public link to the generated report
 - `source_reliability` rates each data source so readers understand the confidence level of each section — official open data receives `"high"`, scraped sources receive `"medium"`, and unverifiable sources receive `"low"`
-- If `low_confidence_disclaimer` is `true`, a prominent disclaimer banner is rendered at the top of all export formats
+- If `low_confidence_disclaimer` is `true` (set when Thinking Agent confidence falls below `0.6`), a prominent disclaimer banner is rendered at the top of all export formats
+- If any subsection of the Thinking Agent output is missing or marked unavailable, the Report Generator marks that section as `"status": "unavailable"` in the final report rather than failing
 
-**External Data Sources:** None (synthesis)
+**External Data Sources:** None (synthesis only)
 
 ---
 
@@ -682,7 +503,7 @@ class InfrastructureReportRequest(BaseModel):
     fiscal_year: int = Field(..., description="Fiscal year for budget analysis")
     image_url: Optional[str] = Field(None, description="Optional image URL for severity assessment")
     image_base64: Optional[str] = Field(None, description="Optional base64-encoded image")
-    force_refresh: Optional[List[str]] = Field(None, description="List of agent names to re-run even if saved data exists (e.g. ['contractor', 'budget'])")
+    force_refresh: Optional[List[str]] = Field(None, description="List of agent names to re-run even if saved data exists (e.g. ['thinking', 'report'])")
 ```
 
 **Response Model:**
@@ -709,7 +530,7 @@ class ReportStatusResponse(BaseModel):
     incident_id: Optional[str]
     status: str           # "pending" | "running" | "complete" | "failed"
     progress: int         # 0-100
-    current_agent: str    # e.g., "cost_research"
+    current_agent: str    # e.g., "thinking" or "report"
     cache_hit: bool
     agents_completed: List[str]
     agents_skipped: List[str]
@@ -740,13 +561,13 @@ class IncidentDetailResponse(BaseModel):
 
 #### WebSocket `/ws/v1/workflow/infrastructure-report/{report_id}`
 
-Real-time streaming progress updates. Emits a message each time an agent completes:
+Real-time streaming progress updates. Emits a message each time an agent completes or an internal processing step within the Thinking Agent progresses:
 
 ```json
 {
   "event": "agent_complete",
-  "agent_id": "cost_research",
-  "progress": 33,
+  "agent_id": "thinking",
+  "progress": 50,
   "timestamp": "2025-01-15T10:28:45Z"
 }
 ```
@@ -760,13 +581,8 @@ backend/app/
 ├── agents/
 │   ├── __init__.py
 │   ├── base.py              # Abstract base agent class
-│   ├── planner.py           # Agent 1
-│   ├── cost_research.py     # Agent 2
-│   ├── repair_plan.py       # Agent 3
-│   ├── contractor.py        # Agent 4
-│   ├── budget.py            # Agent 5
-│   ├── validation.py        # Agent 6
-│   └── report_gen.py        # Agent 7
+│   ├── thinking.py          # Agent 1: Unified Thinking Agent
+│   └── report_gen.py        # Agent 2: Report Generator Agent
 ├── services/
 │   ├── __init__.py
 │   ├── web_scraper.py       # BeautifulSoup utilities (with rate limiting)
@@ -785,7 +601,7 @@ backend/app/
 
 ## Web Scraping Ethics & Rate Limiting
 
-All scraping agents must comply with the following rules:
+All scraping within the Thinking Agent must comply with the following rules:
 
 | Rule | Requirement |
 |------|-------------|
@@ -804,26 +620,13 @@ All configuration must be stored in environment variables. The following are req
 
 ```env
 # Gemini
-GEMINI_API_KEY=
+GOOGLE_API_KEY=
 
 # MongoDB
-MONGODB_URI=mongodb://localhost:27017
-MONGODB_DB_NAME=infrastructure_reports
+MONGO_URI=mongodb://localhost:27017
+MONGO_DB_NAME=infrastructure_reports
 
 # Geocoding
-GOOGLE_MAPS_API_KEY=          # or leave blank to use Census geocoder
-
-# Caching
-REDIS_URL=redis://localhost:6379
-CACHE_DEFAULT_TTL_DAYS=7
-
-# Scraping
-SCRAPING_PROXY_URL=           # Optional; recommended for production
-SCRAPING_USER_AGENT_POOL=     # Comma-separated list of User-Agent strings
-
-# Report Storage
-REPORT_BASE_URL=https://reports.example.com
-REPORT_STORAGE_PATH=/var/reports
 ```
 
 ---
@@ -832,11 +635,11 @@ REPORT_STORAGE_PATH=/var/reports
 
 | Phase | Agents / Features |
 |-------|-------------------|
-| **Phase 1** | Core agents: Planner, Cost Research, Report Generator |
+| **Phase 1** | Thinking Agent (planning, cost research, repair plan) + Report Generator |
 | **Phase 2** | MongoDB persistence: `incidents` collection, per-agent collections, orchestrator save/load logic, `incident_id` routing |
 | **Phase 3** | External integrations: web scraping, open data, caching layer |
-| **Phase 4** | Advanced agents: Repair Plan, Contractor (with license verification), Budget (with grant matching) |
-| **Phase 5** | Validation/QA Agent, retry logic, confidence scoring, `force_refresh` support |
+| **Phase 4** | Thinking Agent: contractor discovery with license verification, budget analysis with grant matching |
+| **Phase 5** | Retry logic, confidence scoring, `force_refresh` support, low-confidence disclaimer |
 | **Phase 6** | Report formatting (PDF, HTML), shareable report URLs, WebSocket streaming |
 
 ---

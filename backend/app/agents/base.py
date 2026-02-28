@@ -1,56 +1,44 @@
 import os
+from datetime import datetime
 import json
-import logging
-from typing import Dict, Any, Type
+import time
+from typing import Dict, Any
+from pydantic import BaseModel
 from google import genai
 from google.genai import types
 
-logger = logging.getLogger(__name__)
-
-GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
-MODEL_NAME = "gemini-2.5-flash"  # Using 2.5 flash as 3-flash preview may not be readily available via google-genai or we use whatever is available in SDK
-
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-
-class BaseAgent:
-    name: str = "base_agent"
+class AgentBase:
+    def __init__(self, name: str):
+        self.name = name
+        self.api_key = os.getenv("GOOGLE_API_KEY")
+        if not self.api_key:
+            print(f"Warning: GOOGLE_API_KEY not set for {self.name}")
+        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
+        self.model_name = "gemini-2.5-flash"  # using a known fast model
 
     async def run(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Override to implement agent specific logic"""
-        raise NotImplementedError()
-
-    async def ask_gemini(self, prompt: str, schema: Type[Any] = None) -> Dict[str, Any]:
-        if not client:
-            logger.warning(f"{self.name} returning mock data because GEMINI_API_KEY is missing.")
-            return {"mock": True}
+        """Runs the agent and returns standard envelope output."""
+        start_time = time.time()
         
         try:
-            config = types.GenerateContentConfig()
-            if schema:
-                config.response_mime_type = "application/json"
-                config.response_schema = schema
-
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=prompt,
-                config=config
-            )
-            
-            if schema:
-                return json.loads(response.text)
-            return {"text": response.text}
+            result_data = await self.execute(inputs)
+            confidence = 0.9 # placeholder, real logic could parse this
         except Exception as e:
-            logger.error(f"Gemini API error in {self.name}: {e}")
-            return {"error": str(e), "confidence": 0.1}
+            result_data = {"error": str(e)}
+            confidence = 0.0
 
-    def wrap_output(self, data: Dict[str, Any], confidence: float = 0.9, tokens: int = 1500, duration: int = 2000) -> Dict[str, Any]:
-        import datetime
+        duration_ms = int((time.time() - start_time) * 1000)
+        
         return {
             "agent_id": self.name,
-            "executed_at": datetime.datetime.utcnow().isoformat() + "Z",
-            "duration_ms": duration,
-            "model_used": MODEL_NAME,
-            "tokens_used": tokens,
+            "executed_at": datetime.utcnow().isoformat() + "Z",
+            "duration_ms": duration_ms,
+            "model_used": self.model_name,
+            "tokens_used": 0, # Could be pulled from usageMetadata
             "confidence": confidence,
-            "data": data
+            "data": result_data
         }
+
+    async def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Override this method in subclasses."""
+        raise NotImplementedError
