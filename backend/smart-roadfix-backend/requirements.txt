@@ -1,0 +1,36 @@
+# Smart RoadFix Backend Dependencies
+# Python 3.11+
+
+# FastAPI and ASGI server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# MongoDB
+motor>=3.3.2
+
+# HTTP client (async)
+httpx>=0.26.0
+
+# Auth0 / JWT
+python-jose[cryptography]>=3.3.0
+
+# Pydantic
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Utilities
+python-multipart>=0.0.6  # For file uploads
+
+# Development dependencies
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+
+# Type hints
+types-python-dotenv>=0.21.0
+
+# Code quality
+ruff>=0.1.0
