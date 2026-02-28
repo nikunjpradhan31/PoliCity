@@ -6,6 +6,14 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from google import genai
 
+# Library for PDF Generation
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+from reportlab.platypus import ListFlowable, ListItem
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import PageBreak
+
 load_dotenv()
 
 api_key = os.getenv("GEMINI_KEY")
@@ -121,8 +129,64 @@ def generateReport(report_content, graphs, Report):
 
     return response.parsed
 
+def generatepdf(report, output_filename="PoliCity_Report.pdf"):
+    doc = SimpleDocTemplate(output_filename)
+    elements = []
+
+    styles = getSampleStyleSheet()
+    normal = styles["Normal"]
+    heading = styles["Heading1"]
+
+    # Title
+    elements.append(Paragraph("Municipal Infrastructure Financial Report", heading))
+    elements.append(Spacer(1, 0.3 * inch))
+
+    # Location
+    elements.append(Paragraph(f"<b>Location:</b> {report['locations']}", normal))
+    elements.append(Spacer(1, 0.2 * inch))
+
+    # Summary
+    elements.append(Paragraph("<b>Summary</b>", styles["Heading2"]))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(report["summary"], normal))
+    elements.append(Spacer(1, 0.3 * inch))
+
+    # Cuts
+    elements.append(Paragraph("<b>Budget Cuts</b>", styles["Heading2"]))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(report["cuts"], normal))
+    elements.append(Spacer(1, 0.3 * inch))
+
+    # Priorities
+    elements.append(Paragraph("<b>Priorities</b>", styles["Heading2"]))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(report["priorities"], normal))
+    elements.append(PageBreak())
+
+    # Contractors
+    elements.append(Paragraph("<b>Contractors</b>", styles["Heading2"]))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(report["contractors"], normal))
+    elements.append(PageBreak())
+
+    # Graphs
+    elements.append(Paragraph("<b>Cost Breakdown Graphs</b>", styles["Heading1"]))
+    elements.append(Spacer(1, 0.3 * inch))
+
+    for i, graph in enumerate(report["graphs"]):
+        image_filename = f"graph_{i}.png"
+        renderGraph(graph, image_filename)
+
+        elements.append(Paragraph(graph["title"], styles["Heading2"]))
+        elements.append(Spacer(1, 0.2 * inch))
+        elements.append(Image(image_filename, width=6*inch, height=4*inch))
+        elements.append(Spacer(1, 0.5 * inch))
+
+    doc.build(elements)
+
 graphs = generateGraphData(report_content, Graph)
 graphImagePath = renderGraph(graphs)
 promptResponse = generateReport(report_content, graphs, Report)
+generatepdf(promptResponse)
 
 print(promptResponse)
