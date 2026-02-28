@@ -1,14 +1,51 @@
 """
 API routes for PoliCity API.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from typing import Dict, Any, List, Optional
+import joblib
+import os
 
 from app.models import MessageResponse, User
-from app.db import get_database
+from app.db import get_database, get_collection
+from app.workflows.infrastructure import workflow
 
 # Create API router
 router = APIRouter()
+
+# Get the base directory for model loading
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Load ML models
+try:
+    vectorizer = joblib.load(os.path.join(BASE_DIR, "tfidf_vectorizer.pkl"))
+    clf = joblib.load(os.path.join(BASE_DIR, "issue_classifier.pkl"))
+except Exception as e:
+    print(f"Warning: Could not load ML models: {e}")
+    vectorizer = None
+    clf = None
+
+
+def predict_issue(text: str) -> str:
+    """
+    Predict the issue class using the loaded ML models.
+    
+    Args:
+        text: The summary text to classify.
+    
+    Returns:
+        The predicted class label.
+    """
+    if vectorizer is None or clf is None or not text:
+        return "Unknown"
+    
+    try:
+        vec = vectorizer.transform([text])
+        return clf.predict(vec)[0]
+    except Exception as e:
+        print(f"Error predicting issue: {e}")
+        return "Unknown"
 
 
 @router.get("/", response_model=MessageResponse)
@@ -42,3 +79,167 @@ async def health_check():
         "status": "healthy" if db_status == "connected" else "unhealthy",
         "database": db_status
     }
+
+
+class IssueDataPoint(BaseModel):
+    """
+    Data point model for SeeClickFix issues.
+    """
+    longitude: float = Field(..., description="Longitude coordinate")
+    latitude: float = Field(..., description="Latitude coordinate")
+    address: Optional[str] = Field(None, description="Issue address")
+    description: Optional[str] = Field(None, description="Issue description")
+    id: str = Field(..., description="MongoDB document ID")
+    scf_id: int = Field(..., description="SeeClickFix issue ID")
+    classification: str = Field(..., description="ML-predicted issue class")
+
+
+@router.get("/issues/bounds", response_model=List[IssueDataPoint])
+async def get_issues_by_bounds(
+    long_1: float = Query(..., description="Minimum longitude"),
+    lat_1: float = Query(..., description="Minimum latitude"),
+    long_2: float = Query(..., description="Maximum longitude"),
+    lat_2: float = Query(..., description="Maximum latitude"),
+    count: int = Query(50, description="Maximum number of results", ge=1, le=1000)
+):
+    """
+    Get SeeClickFix issues within a bounding box.
+    
+    Retrieves issues with status='Open' within the specified geographic bounds
+    and classifies each issue's summary using ML models.
+    
+    Args:
+        long_1: Minimum longitude (west boundary)
+        lat_1: Minimum latitude (south boundary)
+        long_2: Maximum longitude (east boundary)
+        lat_2: Maximum latitude (north boundary)
+        count: Maximum number of results (default 50, max 1000)
+    
+    Returns:
+        List of IssueDataPoint with classified issues.
+    """
+    collection = get_collection("seeclickfix_issues")
+    
+    # Determine min/max for longitude and latitude
+    min_long = min(long_1, long_2)
+    max_long = max(long_1, long_2)
+    min_lat = min(lat_1, lat_2)
+    max_lat = max(lat_1, lat_2)
+    
+    # Build query for bounding box and status
+    query = {
+        "status": "Open",
+        "longitude": {"$gte": min_long, "$lte": max_long},
+        "latitude": {"$gte": min_lat, "$lte": max_lat}
+    }
+    
+    # Fetch issues from MongoDB
+    issues = list(collection.find(query).limit(count))
+    
+    # Process and classify each issue
+    result = []
+    for issue in issues:
+        # Get the summary for classification
+        summary = issue.get("summary", "")
+        
+        # Classify the issue using ML models
+        classification = predict_issue(summary) if summary else "Unknown"
+        
+        data_point = IssueDataPoint(
+            longitude=issue.get("longitude", 0.0),
+            latitude=issue.get("latitude", 0.0),
+            address=issue.get("address"),
+            description=issue.get("description"),
+            id=str(issue.get("_id", "")),
+            scf_id=issue.get("scf_id", 0),
+            classification=classification
+        )
+        result.append(data_point)
+    
+    return result
+
+
+# ============================================
+# Infrastructure Reporting Workflow Endpoints
+# ============================================
+from datetime import datetime
+from fastapi import BackgroundTasks
+
+class InfrastructureReportRequest(BaseModel):
+    incident_id: Optional[str] = Field(None, description="Unique incident identifier. If provided and a prior run exists in MongoDB, saved results are returned without re-running agents")
+    issue_type: str = Field(..., description="Type of infrastructure issue")
+    location: str = Field(..., description="City and state")
+    fiscal_year: int = Field(..., description="Fiscal year for budget analysis")
+    image_url: Optional[str] = Field(None, description="Optional image URL for severity assessment")
+    image_base64: Optional[str] = Field(None, description="Optional base64-encoded image")
+    force_refresh: Optional[List[str]] = Field(None, description="List of agent names to re-run even if saved data exists")
+
+class InfrastructureReportResponse(BaseModel):
+    report_id: str
+    incident_id: Optional[str] = None
+    status: str
+    progress: int
+    cache_hit: bool
+    agents_skipped: List[str]
+    result: Optional[dict] = None
+
+class ReportStatusResponse(BaseModel):
+    report_id: str
+    incident_id: Optional[str] = None
+    status: str
+    progress: int
+    current_agent: str
+    cache_hit: bool
+    agents_completed: List[str]
+    agents_skipped: List[str]
+    agents_failed: List[str]
+    result: Optional[dict] = None
+    error: Optional[str] = None
+
+class IncidentDetailResponse(BaseModel):
+    incident_id: str
+    status: str
+    inputs: dict
+    pipeline_run: dict
+    agent_outputs: dict
+    report_url: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+@router.post("/workflow/infrastructure-report", response_model=InfrastructureReportResponse)
+async def generate_infrastructure_report(request: InfrastructureReportRequest, background_tasks: BackgroundTasks):
+    """
+    Initiates a new report generation job.
+    """
+    try:
+        # Start the workflow in background or return immediately if cached
+        response = await workflow.start_pipeline(request.model_dump())
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Workflow initiation failed: {str(e)}")
+
+@router.get("/workflow/infrastructure-report/{report_id}", response_model=ReportStatusResponse)
+async def get_report_status(report_id: str):
+    """
+    Poll for the status of an in-progress report.
+    """
+    try:
+        status = await workflow.get_status(report_id)
+        if not status:
+            raise HTTPException(status_code=404, detail="Report not found")
+        return status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
+
+@router.get("/workflow/infrastructure-report/incident/{incident_id}", response_model=IncidentDetailResponse)
+async def get_incident_details(incident_id: str):
+    """
+    Retrieve the full saved record for a known incident directly from MongoDB.
+    """
+    try:
+        details = await workflow.get_incident(incident_id)
+        if not details:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        return details
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get incident: {str(e)}")
