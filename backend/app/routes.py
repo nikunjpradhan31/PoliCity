@@ -9,6 +9,7 @@ import os
 
 from app.models import MessageResponse, User
 from app.db import get_database, get_collection
+from app.workflows.infrastructure import workflow
 
 # Create API router
 router = APIRouter()
@@ -128,8 +129,8 @@ async def get_issues_by_bounds(
     # Build query for bounding box and status
     query = {
         "status": "Open",
-        #"longitude": {"$gte": min_long, "$lte": max_long},
-        #"latitude": {"$gte": min_lat, "$lte": max_lat}
+        "longitude": {"$gte": min_long, "$lte": max_long},
+        "latitude": {"$gte": min_lat, "$lte": max_lat}
     }
     
     # Fetch issues from MongoDB
@@ -156,3 +157,89 @@ async def get_issues_by_bounds(
         result.append(data_point)
     
     return result
+
+
+# ============================================
+# Infrastructure Reporting Workflow Endpoints
+# ============================================
+from datetime import datetime
+from fastapi import BackgroundTasks
+
+class InfrastructureReportRequest(BaseModel):
+    incident_id: Optional[str] = Field(None, description="Unique incident identifier. If provided and a prior run exists in MongoDB, saved results are returned without re-running agents")
+    issue_type: str = Field(..., description="Type of infrastructure issue")
+    location: str = Field(..., description="City and state")
+    fiscal_year: int = Field(..., description="Fiscal year for budget analysis")
+    image_url: Optional[str] = Field(None, description="Optional image URL for severity assessment")
+    image_base64: Optional[str] = Field(None, description="Optional base64-encoded image")
+    force_refresh: Optional[List[str]] = Field(None, description="List of agent names to re-run even if saved data exists")
+
+class InfrastructureReportResponse(BaseModel):
+    report_id: str
+    incident_id: Optional[str] = None
+    status: str
+    progress: int
+    cache_hit: bool
+    agents_skipped: List[str]
+    result: Optional[dict] = None
+
+class ReportStatusResponse(BaseModel):
+    report_id: str
+    incident_id: Optional[str] = None
+    status: str
+    progress: int
+    current_agent: str
+    cache_hit: bool
+    agents_completed: List[str]
+    agents_skipped: List[str]
+    agents_failed: List[str]
+    result: Optional[dict] = None
+    error: Optional[str] = None
+
+class IncidentDetailResponse(BaseModel):
+    incident_id: str
+    status: str
+    inputs: dict
+    pipeline_run: dict
+    agent_outputs: dict
+    report_url: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+@router.post("/workflow/infrastructure-report", response_model=InfrastructureReportResponse)
+async def generate_infrastructure_report(request: InfrastructureReportRequest, background_tasks: BackgroundTasks):
+    """
+    Initiates a new report generation job.
+    """
+    try:
+        # Start the workflow in background or return immediately if cached
+        response = await workflow.start_pipeline(request.model_dump())
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Workflow initiation failed: {str(e)}")
+
+@router.get("/workflow/infrastructure-report/{report_id}", response_model=ReportStatusResponse)
+async def get_report_status(report_id: str):
+    """
+    Poll for the status of an in-progress report.
+    """
+    try:
+        status = await workflow.get_status(report_id)
+        if not status:
+            raise HTTPException(status_code=404, detail="Report not found")
+        return status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
+
+@router.get("/workflow/infrastructure-report/incident/{incident_id}", response_model=IncidentDetailResponse)
+async def get_incident_details(incident_id: str):
+    """
+    Retrieve the full saved record for a known incident directly from MongoDB.
+    """
+    try:
+        details = await workflow.get_incident(incident_id)
+        if not details:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        return details
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get incident: {str(e)}")
