@@ -23,6 +23,7 @@ pymongo[srv]>=4.6.0
 
 # Utilities
 python-multipart>=0.0.6  # For file uploads
+joblib>=1.3.0  # For ML model loading
 
 # Development dependencies
 pytest>=8.0.0
