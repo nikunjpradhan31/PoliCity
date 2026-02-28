@@ -18,6 +18,9 @@ pydantic-settings>=2.1.0
 # Environment variables
 python-dotenv>=1.0.0
 
+# MongoDB
+pymongo[srv]>=4.6.0
+
 # Utilities
 python-multipart>=0.0.6  # For file uploads
 

@@ -1,89 +1,85 @@
-"""FastAPI application entry point."""
-
-from contextlib import asynccontextmanager
-
+"""
+FastAPI application initialization for PoliCity API.
+"""
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import os
+from dotenv import load_dotenv
 
-from app.core.config import get_settings
-from app.core.database import connect_to_mongo, close_mongo_connection
-from app.core.logging import setup_logging, logger
-from app.core.middleware import setup_cors, RequestLoggingMiddleware
-from app.api.routes import health, potholes, budget, optimization, reports
+from app.routes import router
+from app.db import close_mongo_connection, get_mongo_client
 
+# Load environment variables
+load_dotenv()
 
-settings = get_settings()
+# App configuration
+APP_NAME: str = os.getenv("APP_NAME", "PoliCity API")
+APP_VERSION: str = os.getenv("APP_VERSION", "1.0.0")
+DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
+
+# CORS configuration
+CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Application lifespan manager.
-    
     Handles startup and shutdown events.
     """
     # Startup
-    setup_logging()
-    logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    
-    try:
-        await connect_to_mongo()
-        logger.info("Connected to MongoDB")
-    except Exception as e:
-        logger.error(f"Failed to connect to MongoDB: {e}")
-    
+    print(f"Starting {APP_NAME} v{APP_VERSION}")
+    get_mongo_client()
     yield
-    
     # Shutdown
-    logger.info("Shutting down application")
-    await close_mongo_connection()
-    logger.info("Closed MongoDB connection")
+    close_mongo_connection()
+    print("Shutting down application")
 
 
 # Create FastAPI application
 app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
-    description="Municipal pothole optimization platform API",
-    lifespan=lifespan,
+    title=APP_NAME,
+    version=APP_VERSION,
+    description="PoliCity API",
+    debug=DEBUG,
+    lifespan=lifespan
 )
 
-# Setup middleware
-setup_cors(app)
-app.add_middleware(RequestLoggingMiddleware)
-
+# Configure CORS
+cors_origins = [origin.strip() for origin in CORS_ORIGINS.split(",")]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Include routers
-app.include_router(health.router, prefix="/api/v1")
-app.include_router(potholes.router, prefix="/api/v1")
-app.include_router(budget.router, prefix="/api/v1")
-app.include_router(optimization.router, prefix="/api/v1")
-app.include_router(reports.router, prefix="/api/v1")
+app.include_router(router, prefix="/api/v1")
 
 
-@app.get(
-    "/",
-    summary="Root endpoint",
-    description="Returns API information",
-)
+@app.get("/")
 async def root():
-    """Root endpoint returning API information."""
-    return JSONResponse(
-        content={
-            "name": settings.APP_NAME,
-            "version": settings.APP_VERSION,
-            "status": "running",
-            "docs": "/docs",
-        }
-    )
+    """
+    Root endpoint - redirects to API info.
+    """
+    return {
+        "message": "Welcome to PoliCity API",
+        "version": APP_VERSION,
+        "docs": "/docs"
+    }
 
 
+# Run the application
 if __name__ == "__main__":
     import uvicorn
-    
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
     uvicorn.run(
         "app.main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.DEBUG,
+        host=host,
+        port=port,
+        reload=DEBUG
     )
