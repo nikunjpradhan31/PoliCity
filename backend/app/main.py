@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from app.routes import router
 from app.db import close_mongo_connection, get_mongo_client
+from app.services.mongo import setup_indexes
 
 # Load environment variables
 load_dotenv()
@@ -31,6 +32,14 @@ async def lifespan(app: FastAPI):
     # Startup
     print(f"Starting {APP_NAME} v{APP_VERSION}")
     get_mongo_client()
+    
+    # Setup workflow indexes
+    try:
+        await setup_indexes()
+        print("Setup workflow database indexes")
+    except Exception as e:
+        print(f"Failed to setup workflow indexes: {e}")
+        
     yield
     # Shutdown
     close_mongo_connection()

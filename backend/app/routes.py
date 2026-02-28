@@ -1,14 +1,22 @@
 """
 API routes for PoliCity API.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 import joblib
 import os
 
-from app.models import MessageResponse, User
+from app.models import (
+    MessageResponse, 
+    User,
+    InfrastructureReportRequest,
+    InfrastructureReportResponse,
+    ReportStatusResponse,
+    IncidentDetailResponse
+)
 from app.db import get_database, get_collection
+from app.workflows.infrastructure import workflow
 
 # Create API router
 router = APIRouter()
@@ -128,8 +136,8 @@ async def get_issues_by_bounds(
     # Build query for bounding box and status
     query = {
         "status": "Open",
-        #"longitude": {"$gte": min_long, "$lte": max_long},
-        #"latitude": {"$gte": min_lat, "$lte": max_lat}
+        "longitude": {"$gte": min_long, "$lte": max_long},
+        "latitude": {"$gte": min_lat, "$lte": max_lat}
     }
     
     # Fetch issues from MongoDB
@@ -156,3 +164,71 @@ async def get_issues_by_bounds(
         result.append(data_point)
     
     return result
+
+
+# ============================================
+# Infrastructure Reporting Workflow Endpoints
+# ============================================
+from datetime import datetime
+from fastapi import BackgroundTasks
+
+@router.post("/workflow/infrastructure-report", response_model=InfrastructureReportResponse)
+async def generate_infrastructure_report(request: InfrastructureReportRequest, background_tasks: BackgroundTasks):
+    """
+    Initiates a new report generation job.
+    """
+    try:
+        # Start the workflow in background or return immediately if cached
+        response = await workflow.start_pipeline(request.model_dump())
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Workflow initiation failed: {str(e)}")
+
+@router.get("/workflow/infrastructure-report/{report_id}", response_model=ReportStatusResponse)
+async def get_report_status(report_id: str):
+    """
+    Poll for the status of an in-progress report.
+    """
+    try:
+        status = await workflow.get_status(report_id)
+        if not status:
+            raise HTTPException(status_code=404, detail="Report not found")
+        return status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
+
+@router.get("/workflow/infrastructure-report/incident/{incident_id}", response_model=IncidentDetailResponse)
+async def get_incident_details(incident_id: str):
+    """
+    Retrieve the full saved record for a known incident directly from MongoDB.
+    """
+    try:
+        details = await workflow.get_incident(incident_id)
+        if not details:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        return details
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get incident: {str(e)}")
+
+import asyncio
+
+@router.websocket("/workflow/infrastructure-report/{report_id}/ws")
+async def websocket_endpoint(websocket: WebSocket, report_id: str):
+    await websocket.accept()
+    try:
+        while True:
+            # Poll status every 2 seconds and push to client
+            status = await workflow.get_status(report_id)
+            if status:
+                await websocket.send_json(status)
+                if status.get("status") in ["complete", "failed"]:
+                    break
+            else:
+                await websocket.send_json({"error": "Report not found"})
+                break
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        print(f"Client disconnected from report {report_id}")
+    except Exception as e:
+        await websocket.close(code=1011, reason=str(e))
+
