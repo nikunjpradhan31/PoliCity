@@ -129,7 +129,7 @@ def generateReport(report_content, graphs, Report):
 
     return response.parsed
 
-def generatepdf(report, output_filename="PoliCity_Report.pdf"):
+def generatepdf(report, graphs, output_filename="PoliCity_Report.pdf"):
     doc = SimpleDocTemplate(output_filename)
     elements = []
 
@@ -166,8 +166,17 @@ def generatepdf(report, output_filename="PoliCity_Report.pdf"):
     # Contractors
     elements.append(Paragraph("<b>Contractors</b>", styles["Heading2"]))
     elements.append(Spacer(1, 0.1 * inch))
-    elements.append(Paragraph(report["contractors"], normal))
-    elements.append(PageBreak())
+    if report["contractors"]:
+        for contractor in report["contractors"]:
+            contractor_text = (
+                f"<b>{contractor['name']}</b><br/>"
+                f"Phone: {contractor['phone']}<br/>"
+                f"Address: {contractor['address']}<br/><br/>"
+            )
+            elements.append(Paragraph(contractor_text, normal))
+            elements.append(PageBreak())
+    else:
+        elements.append(Paragraph("No contractors were identified for this project.", normal))
 
     # Graphs
     elements.append(Paragraph("<b>Cost Breakdown Graphs</b>", styles["Heading1"]))
@@ -175,7 +184,7 @@ def generatepdf(report, output_filename="PoliCity_Report.pdf"):
 
     for i, graph in enumerate(report["graphs"]):
         image_filename = f"graph_{i}.png"
-        renderGraph(graph, image_filename)
+        renderGraph(graphs, image_filename)
 
         elements.append(Paragraph(graph["title"], styles["Heading2"]))
         elements.append(Spacer(1, 0.2 * inch))
@@ -185,8 +194,5 @@ def generatepdf(report, output_filename="PoliCity_Report.pdf"):
     doc.build(elements)
 
 graphs = generateGraphData(report_content, Graph)
-graphImagePath = renderGraph(graphs)
 promptResponse = generateReport(report_content, graphs, Report)
-generatepdf(promptResponse)
-
-print(promptResponse)
+generatepdf(promptResponse.model_dump(), graphs)
