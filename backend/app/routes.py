@@ -11,12 +11,14 @@ from app.models import (
     MessageResponse, 
     User,
     InfrastructureReportRequest,
+    MultiInfrastructureReportRequest,
     InfrastructureReportResponse,
     ReportStatusResponse,
     IncidentDetailResponse
 )
 from app.db import get_database, get_collection
 from app.workflows.infrastructure import workflow
+from app.workflows.multi_infrastructure import multi_workflow
 
 # Create API router
 router = APIRouter()
@@ -184,13 +186,28 @@ async def generate_infrastructure_report(request: InfrastructureReportRequest, b
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Workflow initiation failed: {str(e)}")
 
+@router.post("/workflow/infrastructure-report/bulk", response_model=InfrastructureReportResponse)
+async def generate_multi_infrastructure_report(request: MultiInfrastructureReportRequest, background_tasks: BackgroundTasks):
+    """
+    Initiates a new multi-incident report generation job.
+    """
+    try:
+        response = await multi_workflow.start_pipeline(request.model_dump())
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Multi-workflow initiation failed: {str(e)}")
+
 @router.get("/workflow/infrastructure-report/{report_id}", response_model=ReportStatusResponse)
 async def get_report_status(report_id: str):
     """
     Poll for the status of an in-progress report.
     """
     try:
-        status = await workflow.get_status(report_id)
+        if report_id.startswith("MULTI-INC-"):
+            status = await multi_workflow.get_status(report_id)
+        else:
+            status = await workflow.get_status(report_id)
+            
         if not status:
             raise HTTPException(status_code=404, detail="Report not found")
         return status
@@ -203,7 +220,11 @@ async def get_incident_details(incident_id: str):
     Retrieve the full saved record for a known incident directly from MongoDB.
     """
     try:
-        details = await workflow.get_incident(incident_id)
+        if incident_id.startswith("MULTI-INC-"):
+            details = await multi_workflow.get_incident(incident_id)
+        else:
+            details = await workflow.get_incident(incident_id)
+            
         if not details:
             raise HTTPException(status_code=404, detail="Incident not found")
         return details
@@ -218,7 +239,11 @@ async def websocket_endpoint(websocket: WebSocket, report_id: str):
     try:
         while True:
             # Poll status every 2 seconds and push to client
-            status = await workflow.get_status(report_id)
+            if report_id.startswith("MULTI-INC-"):
+                status = await multi_workflow.get_status(report_id)
+            else:
+                status = await workflow.get_status(report_id)
+                
             if status:
                 await websocket.send_json(status)
                 if status.get("status") in ["complete", "failed"]:
