@@ -66,7 +66,6 @@ class InfrastructureWorkflow:
         except InvalidId:
             query_id = incident_id
             
-        # ✅ FIX: Shoved the synchronous PyMongo call into a background thread!
         doc = await asyncio.to_thread(collection.find_one, {"_id": query_id})
         
         if not doc:
@@ -223,7 +222,8 @@ class InfrastructureWorkflow:
             {
                 "pipeline_run": incident["pipeline_run"], 
                 "progress": 100, 
-                "report_url": f"/api/v1/workflow/infrastructure-report/{incident_id}/download"
+                
+                "report_url": f"/api/v1/workflow/infrastructure-report/{incident_id}/pdf"
             }
         )
 
