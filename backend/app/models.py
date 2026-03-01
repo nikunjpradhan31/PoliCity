@@ -49,6 +49,11 @@ class InfrastructureReportRequest(BaseModel):
     image_base64: Optional[str] = Field(None, description="Optional base64-encoded image")
     force_refresh: Optional[List[str]] = Field(None, description="List of agent names to re-run even if saved data exists")
 
+class MultiInfrastructureReportRequest(BaseModel):
+    incident_ids: List[str] = Field(..., description="List of unique incident identifiers to compile into a single report.")
+    fiscal_year: int = Field(..., description="Fiscal year for budget analysis")
+    force_refresh: Optional[List[str]] = Field(None, description="List of agent names to re-run even if saved data exists")
+
 class InfrastructureReportResponse(BaseModel):
     report_id: str
     incident_id: Optional[str] = None
