@@ -3,10 +3,8 @@ import base64
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak
 )
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.lib import colors
-from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
 
@@ -17,7 +15,7 @@ def generatepdf(report: dict, image_bytes: bytes) -> bytes:
 
     styles = getSampleStyleSheet()
 
-    # Custom style to prevent overflow issues
+    # ---- Custom Styles ----
     body_style = ParagraphStyle(
         "BodyStyle",
         parent=styles["Normal"],
@@ -29,83 +27,120 @@ def generatepdf(report: dict, image_bytes: bytes) -> bytes:
 
     heading = styles["Heading1"]
     heading.fontName = "Times-Roman"
+
     subheading = styles["Heading2"]
     subheading.fontName = "Times-Roman"
 
-    # Custom style to center the key headings
     centered_heading = ParagraphStyle(
-    name="CenteredHeading",
-    parent=heading,
-    alignment=TA_CENTER
+        name="CenteredHeading",
+        parent=heading,
+        alignment=TA_CENTER
     )
 
-    # ---- Safe getters ----
-    location = report.get("locations", "N/A")
-    summary = report.get("summary", "No summary available.")
-    cuts = report.get("cuts", "No budget cuts identified.")
-    priorities = report.get("priorities", "No priorities listed.")
-    contractors = report.get("contractors") or []
-    graph_title = report.get("graph", {}).get("title", "Cost Breakdown")
+    # ---- Extract Data Safely ----
+    data = report.get("data", {})
+    metadata = data.get("report_metadata", {})
+    summary = data.get("executive_summary", {})
+    sections = data.get("sections", {})
+
+    contractors_section = sections.get("contractors", {})
+    contractors_list = contractors_section.get("list", [])
+
+    cost_analysis = sections.get("cost_analysis", {})
+    repair_plan = sections.get("repair_plan", {})
+    budget = sections.get("budget", {})
+    grants = sections.get("grants", {})
+    complaint_history = sections.get("311_complaint_history", {})
 
     # ---- Title ----
     elements.append(Paragraph("<u>Municipal Infrastructure Financial Report</u>", centered_heading))
     elements.append(Spacer(1, 0.3 * inch))
 
-    # ---- Location ----
-    elements.append(Paragraph(f"<u><b>Location:</b></u> {location}", body_style))
+    # ---- Metadata ----
+    location = metadata.get("location", "N/A")
+    issue_type = metadata.get("issue_type", "N/A")
+    fiscal_year = metadata.get("fiscal_year", "N/A")
+
+    elements.append(Paragraph(f"<b>Location:</b> {location}", body_style))
+    elements.append(Paragraph(f"<b>Issue Type:</b> {issue_type}", body_style))
+    elements.append(Paragraph(f"<b>Fiscal Year:</b> {fiscal_year}", body_style))
     elements.append(Spacer(1, 0.3 * inch))
 
-    # ---- Summary ----
-    elements.append(Paragraph("<u>Summary</u>", subheading))
+    # ---- Executive Summary ----
+    elements.append(Paragraph("<u>Executive Summary</u>", subheading))
     elements.append(Spacer(1, 0.1 * inch))
-    elements.append(Paragraph(summary, body_style))
+
+    elements.append(Paragraph(
+        f"<b>Estimated Cost Range:</b> {summary.get('estimated_cost_range', 'N/A')}",
+        body_style
+    ))
+    elements.append(Paragraph(
+        f"<b>Recommended Timeline:</b> {summary.get('recommended_timeline', 'N/A')}",
+        body_style
+    ))
     elements.append(Spacer(1, 0.3 * inch))
 
-    # ---- Cuts ----
-    elements.append(Paragraph("<u>Budget Cuts</u>", subheading))
+    # ---- Cost Analysis ----
+    elements.append(Paragraph("<u>Cost Analysis</u>", subheading))
     elements.append(Spacer(1, 0.1 * inch))
-    elements.append(Paragraph(cuts, body_style))
-    elements.append(Spacer(1, 0.3 * inch))
+    elements.append(Paragraph(cost_analysis.get("narrative", "No data available."), body_style))
+    elements.append(PageBreak())
 
-    # ---- Priorities ----
-    elements.append(Paragraph("<u>Priorities</u>", subheading))
+    # ---- Repair Plan ----
+    elements.append(Paragraph("<u>Repair Plan</u>", subheading))
     elements.append(Spacer(1, 0.1 * inch))
-    elements.append(Paragraph(priorities, body_style))
+    elements.append(Paragraph(repair_plan.get("narrative", "No data available."), body_style))
     elements.append(PageBreak())
 
     # ---- Contractors ----
     elements.append(Paragraph("<u>Contractors</u>", subheading))
     elements.append(Spacer(1, 0.2 * inch))
 
-    if contractors:
-        for contractor in contractors:
+    if contractors_list:
+        for contractor in contractors_list:
             name = contractor.get("name", "Unknown")
             phone = contractor.get("phone", "N/A")
             address = contractor.get("address", "N/A")
+            rating = contractor.get("rating", "N/A")
 
             contractor_text = (
                 f"<b>{name}</b><br/>"
                 f"Phone: {phone}<br/>"
-                f"Address: {address}<br/><br/>"
+                f"Address: {address}<br/>"
+                f"Rating: {rating}<br/><br/>"
             )
 
             elements.append(Paragraph(contractor_text, body_style))
             elements.append(Spacer(1, 0.2 * inch))
     else:
         elements.append(
-            Paragraph("No contractors were identified for this project.", body_style)
+            Paragraph("No contractors identified.", body_style)
         )
 
+    elements.append(PageBreak())
+
+    # ---- Budget ----
+    elements.append(Paragraph("<u>Budget Overview</u>", subheading))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(budget.get("narrative", "No budget data available."), body_style))
+    elements.append(PageBreak())
+
+    # ---- Grants ----
+    elements.append(Paragraph("<u>Grant Opportunities</u>", subheading))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(grants.get("narrative", "No grant data available."), body_style))
+    elements.append(PageBreak())
+
+    # ---- 311 Complaint History ----
+    elements.append(Paragraph("<u>311 Complaint History</u>", subheading))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(complaint_history.get("narrative", "No complaint history available."), body_style))
     elements.append(PageBreak())
 
     # ---- Graph Section ----
     elements.append(Paragraph("<u>Cost Breakdown Graph</u>", centered_heading))
     elements.append(Spacer(1, 0.3 * inch))
 
-    elements.append(Paragraph(graph_title, subheading))
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Handle base64 image if needed
     if isinstance(image_bytes, str):
         image_bytes = base64.b64decode(image_bytes)
 
