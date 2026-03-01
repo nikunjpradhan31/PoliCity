@@ -61,6 +61,7 @@ const Download = () => {
                     style={{
                         padding: "10px 20px",
                         borderRadius: "8px",
+                        cursor: "pointer",
                         border: "none",
                     }}
                 >
@@ -78,6 +79,7 @@ const Download = () => {
                             borderRadius: "8px",
                             border: "none",
                             backgroundColor: "#b084cc",
+                            cursor: "pointer",
                             color: "white",
                         }}
                     >
