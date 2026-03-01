@@ -208,3 +208,5 @@ __marimo__/
 
 # Test files
 test.txt
+*.png
+PoliCity_Report.pdf
