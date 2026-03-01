@@ -1,15 +1,13 @@
 import io
-# Library for PDF Generation
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
-from reportlab.platypus import ListFlowable, ListItem
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib import colors
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak
+)
+from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import PageBreak
 
-
-def generatepdf(report, image_bytes, output_filename="PoliCity_Report.pdf"):
-    doc = SimpleDocTemplate(output_filename)
+def generatepdf(report, image_bytes):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer)
     elements = []
 
     styles = getSampleStyleSheet()
@@ -45,6 +43,7 @@ def generatepdf(report, image_bytes, output_filename="PoliCity_Report.pdf"):
     # Contractors
     elements.append(Paragraph("<b>Contractors</b>", styles["Heading2"]))
     elements.append(Spacer(1, 0.1 * inch))
+
     if report["contractors"]:
         for contractor in report["contractors"]:
             contractor_text = (
@@ -58,8 +57,8 @@ def generatepdf(report, image_bytes, output_filename="PoliCity_Report.pdf"):
         elements.append(Paragraph("No contractors were identified for this project.", normal))
         elements.append(PageBreak())
 
-    # Graphs
-    elements.append(Paragraph("<b>Cost Breakdown Graph</b>", styles["Heading1"]))
+    # Graph
+    elements.append(Paragraph("Cost Breakdown Graph", heading))
     elements.append(Spacer(1, 0.3 * inch))
 
     image_buffer = io.BytesIO(image_bytes)
@@ -67,7 +66,9 @@ def generatepdf(report, image_bytes, output_filename="PoliCity_Report.pdf"):
 
     elements.append(Paragraph(report["graph"]["title"], styles["Heading2"]))
     elements.append(Spacer(1, 0.2 * inch))
-    elements.append(Image(image_buffer, width=6*inch, height=4*inch))
-    elements.append(Spacer(1, 0.5 * inch))
+    elements.append(Image(image_buffer, width=6 * inch, height=4 * inch))
 
     doc.build(elements)
+
+    buffer.seek(0)
+    return buffer.getvalue()

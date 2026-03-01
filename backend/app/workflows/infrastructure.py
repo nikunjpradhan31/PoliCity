@@ -8,8 +8,9 @@ from app.services.mongo import (
     update_incident_status,
     get_agent_output,
     save_agent_output,
-    delete_agent_output
+    delete_agent_output,
 )
+from app.services.pdfcreator import generatepdf
 from app.db import get_collection
 
 from app.agents.thinking import ThinkingAgent
@@ -180,27 +181,36 @@ class InfrastructureWorkflow:
                 return
             
         # Graph Generator Step
-        report_coll = self.agent_collections["graph"]
+        graph_coll = self.agent_collections["graph"]
+
         if "graph" in force_refresh:
-            await delete_agent_output(report_coll, incident_id)
-            
-        saved_report = await get_agent_output(report_coll, incident_id)
-        
-        if saved_report and saved_report.get("confidence", 0) >= 0.6:
-            report_output = saved_report["data"]
+            await delete_agent_output(graph_coll, incident_id)
+
+        saved_graph_doc = await get_agent_output(graph_coll, incident_id)
+
+        if saved_graph_doc and saved_graph_doc.get("confidence", 0) >= 0.6:
+            graph_output = saved_graph_doc["data"]
             incident["pipeline_run"]["agents_skipped"].append("graph")
         else:
             try:
-                report_inputs = {
+                graph_inputs = {
                     "user_inputs": inputs,
                     "thinking_output": thinking_output
                 }
-                result = await self.graph_agent.run(report_inputs)
+
+                result = await self.graph_agent.run(graph_inputs)
+
                 result["incident_id"] = incident_id
-                result["run_count"] = saved_report.get("run_count", 0) + 1 if saved_report else 1
-                await save_agent_output(report_coll, incident_id, result)
-                report_output = result["data"]
+                result["run_count"] = (
+                    saved_graph_doc.get("run_count", 0) + 1
+                    if saved_graph_doc else 1
+                )
+
+                await save_agent_output(graph_coll, incident_id, result)
+
+                graph_output = result["data"]
                 incident["pipeline_run"]["agents_completed"].append("graph")
+
             except Exception as e:
                 incident["pipeline_run"]["agents_failed"].append("graph")
                 await update_incident_status(incident_id, "failed", {"error": str(e)})
@@ -254,7 +264,11 @@ class InfrastructureWorkflow:
         report_out = await get_agent_output(self.agent_collections["report"], incident_id)
         if report_out and "_id" in report_out:
             report_out["_id"] = str(report_out["_id"])
-            
+
+        graph_out = await get_agent_output(self.agent_collections["graph"], incident_id)
+        if graph_out and "_id" in graph_out:
+            graph_out["_id"] = str(graph_out["_id"])
+
         if incident and "_id" in incident:
             incident["_id"] = str(incident["_id"])
 
@@ -271,5 +285,24 @@ class InfrastructureWorkflow:
             "created_at": incident.get("created_at"),
             "updated_at": incident.get("updated_at")
         }
+   
+    async def get_incident_pdf(self, incident_id: str) -> bytes:
+        incident = await get_incident(incident_id)
+        if not incident:
+            return None
+
+        report_out = await get_agent_output(self.agent_collections["report"], incident_id)
+        graph_out = await get_agent_output(self.agent_collections["graph"], incident_id)
+
+        if not report_out or not graph_out:
+            return None
+
+        # Generate PDF bytes
+        pdf_bytes = generatepdf(
+            report=report_out,
+            image_bytes=graph_out["image_bytes"]
+        )
+
+        return pdf_bytes
 
 workflow = InfrastructureWorkflow()

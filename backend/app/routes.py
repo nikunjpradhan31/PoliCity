@@ -20,6 +20,7 @@ from app.db import get_database, get_collection
 from app.workflows.infrastructure import workflow
 from app.workflows.multi_infrastructure import multi_workflow
 
+from fastapi.responses import Response
 # Create API router
 router = APIRouter()
 
@@ -230,6 +231,33 @@ async def get_incident_details(incident_id: str):
         return details
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get incident: {str(e)}")
+
+
+
+@router.get("/workflow/infrastructure-report/incident/{incident_id}/pdf")
+async def download_incident_pdf(incident_id: str):
+    """
+    Generate and download the infrastructure incident PDF.
+    """
+    try:
+        if incident_id.startswith("MULTI-INC-"):
+            pdf_bytes = await multi_workflow.get_incident_pdf(incident_id)
+        else:
+            pdf_bytes = await workflow.get_incident_pdf(incident_id)
+
+        if not pdf_bytes:
+            raise HTTPException(status_code=404, detail="Incident or PDF data not found")
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={incident_id}.pdf"
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
 
 import asyncio
 

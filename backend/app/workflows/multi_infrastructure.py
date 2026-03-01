@@ -11,17 +11,20 @@ from app.services.mongo import (
     delete_agent_output
 )
 from app.db import get_collection
+from app.services.pdfcreator import generatepdf
 
 from app.agents.multi_thinking import MultiThinkingAgent
 from app.agents.multi_report_gen import MultiReportGeneratorAgent
-
+from app.agents.graph import GraphGeneratorAgent
 class MultiInfrastructureWorkflow:
     def __init__(self):
         self.thinking_agent = MultiThinkingAgent()
         self.report_agent = MultiReportGeneratorAgent()
+        self.graph_agent = GraphGeneratorAgent()
         self.agent_collections = {
             "multi_thinking": "agent_multi_thinking",
-            "multi_report": "agent_multi_report"
+            "multi_report": "agent_multi_report",
+            "graph_agent": "agent_graph"
         }
 
     async def start_pipeline(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -149,6 +152,44 @@ class MultiInfrastructureWorkflow:
                 await update_incident_status(report_id, "failed", {"error": str(e)})
                 return
 
+
+        # Graph Step
+        graph_coll = self.agent_collections["graph_agent"]
+
+        if "graph_agent" in force_refresh:
+            await delete_agent_output(graph_coll, report_id)
+
+        saved_graph_doc = await get_agent_output(graph_coll, report_id)
+
+        if saved_graph_doc and saved_graph_doc.get("confidence", 0) >= 0.6:
+            graph_output = saved_graph_doc["data"]
+            incident["pipeline_run"]["agents_skipped"].append("graph_agent")
+        else:
+            try:
+                graph_inputs = {
+                    "user_inputs": inputs,
+                    "thinking_output": thinking_output
+                }
+
+                result = await self.graph_agent.run(graph_inputs)
+
+                result["incident_id"] = report_id
+                result["run_count"] = (
+                    saved_graph_doc.get("run_count", 0) + 1
+                    if saved_graph_doc else 1
+                )
+
+                await save_agent_output(graph_coll, report_id, result)
+
+                graph_output = result["data"]
+                incident["pipeline_run"]["agents_completed"].append("graph_agent")
+
+            except Exception as e:
+                incident["pipeline_run"]["agents_failed"].append("graph_agent")
+                await update_incident_status(report_id, "failed", {"error": str(e)})
+                return
+
+
         # Finish Workflow
         end_time = datetime.utcnow()
         duration = int((end_time - start_time).total_seconds() * 1000)
@@ -214,5 +255,24 @@ class MultiInfrastructureWorkflow:
             "created_at": incident.get("created_at"),
             "updated_at": incident.get("updated_at")
         }
+    
+    async def get_incident_pdf(self, incident_id: str) -> bytes:
+        incident = await get_incident(incident_id)
+        if not incident:
+            return None
+
+        report_out = await get_agent_output(self.agent_collections["multi_report"], incident_id)
+        graph_out = await get_agent_output(self.agent_collections["graph"], incident_id)
+
+        if not report_out or not graph_out:
+            return None
+
+        # Generate PDF bytes
+        pdf_bytes = generatepdf(
+            report=report_out,
+            image_bytes=graph_out["image_bytes"]
+        )
+
+        return pdf_bytes
 
 multi_workflow = MultiInfrastructureWorkflow()
