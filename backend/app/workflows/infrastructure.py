@@ -178,6 +178,33 @@ class InfrastructureWorkflow:
                 incident["pipeline_run"]["agents_failed"].append("report")
                 await update_incident_status(incident_id, "failed", {"error": str(e)})
                 return
+            
+        # Graph Generator Step
+        report_coll = self.agent_collections["graph"]
+        if "graph" in force_refresh:
+            await delete_agent_output(report_coll, incident_id)
+            
+        saved_report = await get_agent_output(report_coll, incident_id)
+        
+        if saved_report and saved_report.get("confidence", 0) >= 0.6:
+            report_output = saved_report["data"]
+            incident["pipeline_run"]["agents_skipped"].append("graph")
+        else:
+            try:
+                report_inputs = {
+                    "user_inputs": inputs,
+                    "thinking_output": thinking_output
+                }
+                result = await self.graph_agent.run(report_inputs)
+                result["incident_id"] = incident_id
+                result["run_count"] = saved_report.get("run_count", 0) + 1 if saved_report else 1
+                await save_agent_output(report_coll, incident_id, result)
+                report_output = result["data"]
+                incident["pipeline_run"]["agents_completed"].append("graph")
+            except Exception as e:
+                incident["pipeline_run"]["agents_failed"].append("graph")
+                await update_incident_status(incident_id, "failed", {"error": str(e)})
+                return
 
         # Finish Workflow
         end_time = datetime.utcnow()
