@@ -38,7 +38,9 @@ def generatepdf(report: dict, image_bytes: bytes) -> bytes:
     )
 
     # ---- Extract Data Safely ----
-    data = report.get("data", {})
+    # Handle both full Mongo document and direct data payload
+    data = report.get("data") if "data" in report else report
+    
     metadata = data.get("report_metadata", {})
     summary = data.get("executive_summary", {})
     sections = data.get("sections", {})

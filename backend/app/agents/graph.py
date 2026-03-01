@@ -3,6 +3,8 @@ import os
 import io
 import sys
 import matplotlib
+import textwrap
+import base64
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
@@ -39,28 +41,43 @@ class GraphGeneratorAgent(AgentBase):
         super().__init__("graph")
     
     def renderGraph(self, graph: Graph):
+    
         labels = [item.label for item in graph.data]
         values = [item.value for item in graph.data]
 
+        # Wrap labels
+        wrapped_labels = [
+            "\n".join(textwrap.wrap(label, 10))
+            for label in labels
+        ]
+
         colors = plt.cm.tab10(np.linspace(0, 1, len(values)))
 
-        plt.figure()
-        plt.bar(labels, values, color=colors)
-        plt.title(graph.title)
-        plt.xlabel(graph.x_axis)
-        plt.ylabel(graph.y_axis)
+        fig_width = max(10, len(values) * 2.2)
+        fig, ax = plt.subplots(figsize=(fig_width, 8))
+
+        ax.bar(range(len(values)), values, color=colors)
+
+        ax.set_xticks(range(len(wrapped_labels)))
+        ax.set_xticklabels(
+            wrapped_labels,
+            rotation=15,          
+            ha="right",           
+            fontsize=9
+        )
+
+        ax.set_title(graph.title)
+        ax.set_xlabel(graph.x_axis)
+        ax.set_ylabel(graph.y_axis)
+
+        fig.tight_layout()
 
         buffer = io.BytesIO()
-        plt.savefig(buffer, format="png")
-        plt.close()
+        fig.savefig(buffer, format="png", dpi=300)
+        plt.close(fig)
 
-        buffer.seek(0)  # rewind to start
-        image_bytes = buffer.getvalue()
-        
-        import base64
-        base64_encoded = base64.b64encode(image_bytes).decode('utf-8')
-
-        return base64_encoded #returns an image that can be stored as a variable
+        buffer.seek(0)
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
     async def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         
