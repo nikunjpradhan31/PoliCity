@@ -10,6 +10,8 @@ from app.services.mongo import (
     save_agent_output,
     delete_agent_output
 )
+from app.db import get_collection
+
 from app.agents.thinking import ThinkingAgent
 from app.agents.report_gen import ReportGeneratorAgent
 
@@ -49,9 +51,30 @@ class InfrastructureWorkflow:
                 "progress": 100,
                 "cache_hit": True,
                 "agents_skipped": ["thinking", "report"],
-                "result": incident.get("report_url", "Report already generated")
+                "result": {"report_url": incident.get("report_url", "Report already generated")}
             }
 
+        collection = get_collection("seeclickfix_issues")
+        
+        from bson.objectid import ObjectId
+        from bson.errors import InvalidId
+        try:
+            query_id = ObjectId(incident_id)
+        except InvalidId:
+            query_id = incident_id
+            
+        doc = collection.find_one({"_id": query_id})
+        if not doc:
+            doc = {}
+        else: 
+            doc["incident_id"] = str(doc["_id"])
+            del doc["_id"]
+            
+            import json
+            # Convert non-JSON types (like datetime) to strings so it remains a "json data type"
+            doc = json.loads(json.dumps(doc, default=str))
+            
+        request_data["issue_data"] = doc
         # Initialize incident if new
         if not incident:
             incident = {
@@ -63,7 +86,8 @@ class InfrastructureWorkflow:
                     "issue_type": request_data.get("issue_type"),
                     "location": request_data.get("location"),
                     "fiscal_year": request_data.get("fiscal_year"),
-                    "image_url": request_data.get("image_url")
+                    "image_url": request_data.get("image_url"),
+                    "issue_data": request_data.get("issue_data")
                 },
                 "pipeline_run": {
                     "started_at": datetime.utcnow().isoformat() + "Z",
@@ -185,7 +209,7 @@ class InfrastructureWorkflow:
             "agents_completed": incident.get("pipeline_run", {}).get("agents_completed", []),
             "agents_skipped": incident.get("pipeline_run", {}).get("agents_skipped", []),
             "agents_failed": incident.get("pipeline_run", {}).get("agents_failed", []),
-            "result": incident.get("report_url"),
+            "result": {"report_url": incident.get("report_url")} if incident.get("report_url") else None,
             "error": incident.get("error")
         }
 
@@ -195,7 +219,15 @@ class InfrastructureWorkflow:
             return None
             
         thinking_out = await get_agent_output(self.agent_collections["thinking"], incident_id)
+        if thinking_out and "_id" in thinking_out:
+            thinking_out["_id"] = str(thinking_out["_id"])
+            
         report_out = await get_agent_output(self.agent_collections["report"], incident_id)
+        if report_out and "_id" in report_out:
+            report_out["_id"] = str(report_out["_id"])
+            
+        if incident and "_id" in incident:
+            incident["_id"] = str(incident["_id"])
 
         return {
             "incident_id": incident_id,
