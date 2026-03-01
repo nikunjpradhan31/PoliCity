@@ -44,7 +44,13 @@ const MapPoint = ({ position, summary, type }) => {
                 weight: 2,
             }}
         >
-            <Popup autoPan={true} minWidth={340} maxWidth={400} minHeight={200} maxHeight={400}>
+            <Popup
+                autoPan={true}
+                minWidth={340}
+                maxWidth={400}
+                minHeight={200}
+                maxHeight={400}
+            >
                 <div
                     style={{
                         textAlign: "center",
@@ -127,6 +133,8 @@ const CityMap = () => {
     const [coords, setCoords] = useState(null);
     const [reportData, setReportData] = useState([]);
 
+    const [isGenerating, setIsGenerating] = useState(false);
+
     // Fetch coordinates for the searched city
     useEffect(() => {
         fetch(
@@ -153,7 +161,7 @@ const CityMap = () => {
             lat_1: bounds.bottomLat,
             long_2: bounds.rightLng,
             lat_2: bounds.topLat,
-            count: 150, 
+            count: 150,
         });
 
         try {
@@ -182,19 +190,45 @@ const CityMap = () => {
     }, []);
 
     // Handle Generate Report Button
-    const handleGenerateReport = () => {
+    const handleGenerateReport = async () => {
         if (reportData.length === 0) {
             alert(
                 "There are no issues currently visible on the map to generate a report for!",
             );
             return;
         }
-        const payload = {
-            city,
-            totalIssues: reportData.length,
-            issues: reportData,
-        };
-        navigate("/loading", { state: payload });
+
+        setIsGenerating(true); // Disable button to prevent double-clicks!
+
+        try {
+            const response = await fetch(
+                "http://localhost:8000/api/v1/workflow/infrastructure-report",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        city: city,
+                        issues: reportData,
+                    }),
+                },
+            );
+
+            if (!response.ok) throw new Error("Failed to start workflow");
+
+            const data = await response.json();
+
+            // (Make sure 'report_id' matches whatever your Python model calls it)
+            navigate("/loading", {
+                state: { reportId: data.report_id || data.id },
+            });
+        } catch (error) {
+            console.error("Error starting report:", error);
+            alert(
+                "Could not start the report generation. Check if the backend is running!",
+            );
+        } finally {
+            setIsGenerating(false);
+        }
     };
 
     return (
@@ -300,20 +334,23 @@ const CityMap = () => {
 
                 <button
                     onClick={handleGenerateReport}
+                    disabled={isGenerating}
                     style={{
                         padding: "12px 25px",
                         fontSize: "16px",
                         fontWeight: "bold",
-                        backgroundColor: "#b084cc",
+                        backgroundColor: isGenerating ? "#bdc3c7" : "#b084cc", // Grays out when clicked
                         color: "white",
                         border: "none",
                         borderRadius: "8px",
-                        cursor: "pointer",
+                        cursor: isGenerating ? "wait" : "pointer",
                         width: "250px",
-                        boxShadow: "0 4px 6px #b084cc",
+                        boxShadow: isGenerating
+                            ? "none"
+                            : "0 4px 6px rgba(176, 132, 204, 0.4)",
                     }}
                 >
-                    Generate Report
+                    {isGenerating ? "Starting Job..." : "Generate Report"}
                 </button>
             </div>
         </div>
