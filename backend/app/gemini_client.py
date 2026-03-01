@@ -101,7 +101,7 @@ def renderGraph(graph: Graph, output_path="graph.png"):
 
     return output_path
 
-def generateReport(report_content, graphs, Report):
+def generateReport(report_content, Report):
     response = client.models.generate_content(
         contents=f"""
         You are a municipal instrastructure and issues financial analyst.
@@ -194,5 +194,5 @@ def generatepdf(report, graphs, output_filename="PoliCity_Report.pdf"):
     doc.build(elements)
 
 graphs = generateGraphData(report_content, Graph)
-promptResponse = generateReport(report_content, graphs, Report)
+promptResponse = generateReport(report_content, Report)
 generatepdf(promptResponse.model_dump(), graphs)

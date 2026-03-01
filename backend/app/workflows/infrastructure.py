@@ -13,12 +13,13 @@ from app.services.mongo import (
 from app.db import get_collection
 
 from app.agents.thinking import ThinkingAgent
-from app.agents.report_gen import ReportGeneratorAgent
+from app.agents.report_gen import ReportGeneratorAgent, GraphGeneratorAgent
 
 class InfrastructureWorkflow:
     def __init__(self):
         self.thinking_agent = ThinkingAgent()
         self.report_agent = ReportGeneratorAgent()
+        self.graph_agent = GraphGeneratorAgent()
         self.agent_collections = {
             "thinking": "agent_thinking",
             "report": "agent_report"
