@@ -262,15 +262,21 @@ class MultiInfrastructureWorkflow:
             return None
 
         report_out = await get_agent_output(self.agent_collections["multi_report"], incident_id)
-        graph_out = await get_agent_output(self.agent_collections["graph"], incident_id)
+        graph_out = await get_agent_output(self.agent_collections["graph_agent"], incident_id)
 
         if not report_out or not graph_out:
             return None
 
+        graph_data = graph_out.get("data", {})
+        image_bytes = graph_data.get("image_bytes")
+
+        if not image_bytes:
+            return None
+
         # Generate PDF bytes
         pdf_bytes = generatepdf(
-            report=report_out,
-            image_bytes=graph_out["image_bytes"]
+            report=report_out.get("data", report_out),
+            image_bytes=image_bytes
         )
 
         return pdf_bytes

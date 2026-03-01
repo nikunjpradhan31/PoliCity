@@ -2,6 +2,8 @@ import json
 import os
 import io
 import sys
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from pydantic import BaseModel
@@ -54,15 +56,18 @@ class GraphGeneratorAgent(AgentBase):
 
         buffer.seek(0)  # rewind to start
         image_bytes = buffer.getvalue()
+        
+        import base64
+        base64_encoded = base64.b64encode(image_bytes).decode('utf-8')
 
-        return image_bytes #returns an image that can be stored as a variable
+        return base64_encoded #returns an image that can be stored as a variable
 
-    def generateGraphData(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         
         thinking_output = inputs.get("thinking_output", {})
         thinking_output_str = json.dumps(thinking_output, indent=2)
 
-        response = self.models.generate_content(
+        response = self.client.models.generate_content(
             contents=f"""
             You are a municipal instrastructure and issues financial analyst.
 
@@ -80,12 +85,13 @@ class GraphGeneratorAgent(AgentBase):
             {thinking_output_str}
             """,
             model = "gemini-2.5-flash",
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": Graph,
-                "temperature": 0.1
-            }
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=Graph,
+                temperature=0.1
+            )
         )
 
-        return self.renderGraph(response.parsed)
+        image_base64 = self.renderGraph(response.parsed)
+        return {"image_bytes": image_base64}
     

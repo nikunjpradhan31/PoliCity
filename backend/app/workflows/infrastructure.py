@@ -24,7 +24,8 @@ class InfrastructureWorkflow:
         self.graph_agent = GraphGeneratorAgent()
         self.agent_collections = {
             "thinking": "agent_thinking",
-            "report": "agent_report"
+            "report": "agent_report",
+            "graph": "graph_agent"
         }
 
     async def start_pipeline(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -292,15 +293,23 @@ class InfrastructureWorkflow:
             return None
 
         report_out = await get_agent_output(self.agent_collections["report"], incident_id)
-        graph_out = await get_agent_output(self.agent_collections["graph"], incident_id)
+        graph_doc = await get_agent_output(
+            self.agent_collections["graph"],
+            incident_id
+        )
 
-        if not report_out or not graph_out:
+        if not report_out or not graph_doc:
             return None
 
-        # Generate PDF bytes
+        graph_data = graph_doc.get("data", {})
+        image_bytes = graph_data.get("image_bytes")
+
+        if not image_bytes:
+            return None
+
         pdf_bytes = generatepdf(
-            report=report_out,
-            image_bytes=graph_out["image_bytes"]
+            report=report_out["data"] if "data" in report_out else report_out,
+            image_bytes=image_bytes
         )
 
         return pdf_bytes
