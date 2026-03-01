@@ -20,39 +20,74 @@ const Loading = () => {
             return;
         }
 
-        // Poll the GET endpoint every 3 seconds
         const intervalId = setInterval(async () => {
             try {
+                // 1. POLL THE STATUS ENDPOINT
                 const statusRes = await fetch(
                     `http://localhost:8000/api/v1/workflow/infrastructure-report/${reportId}`,
                 );
 
                 if (statusRes.ok) {
                     const statusData = await statusRes.json();
+                    const currentStatus = (
+                        statusData.status || ""
+                    ).toLowerCase();
 
-                    // If the backend says the report is ready:
+                    // 2. IF IT IS FINISHED...
                     if (
-                        statusData.status === "completed" ||
-                        statusData.status === "done"
+                        currentStatus === "complete" ||
+                        currentStatus === "completed" ||
+                        currentStatus === "done"
+                    ) {
+                        clearInterval(intervalId); // Stop polling immediately!
+                        setStatusText("Finalizing report... fetching details.");
+
+                        // 3. FETCH THE ACTUAL FINAL REPORT DATA
+                        try {
+                            const incidentId = statusData.incident_id;
+
+                            if (!incidentId) {
+                                throw new Error(
+                                    "Backend finished, but no incident_id was provided.",
+                                );
+                            }
+
+                            const finalReportRes = await fetch(
+                                `http://localhost:8000/api/v1/workflow/infrastructure-report/incident/${incidentId}`,
+                            );
+
+                            if (!finalReportRes.ok) {
+                                throw new Error(
+                                    `HTTP error! status: ${finalReportRes.status}`,
+                                );
+                            }
+
+                            const finalReportData = await finalReportRes.json();
+
+                            // 4. HAND THE FINAL DATA OFF TO THE DOWNLOAD PAGE
+                            navigate("/download", {
+                                state: { report: finalReportData },
+                            });
+                        } catch (fetchError) {
+                            console.error(
+                                "Failed to fetch final incident details:",
+                                fetchError,
+                            );
+                            setStatusText(
+                                "Report finished, but failed to retrieve final data.",
+                            );
+                        }
+                    } else if (
+                        currentStatus === "failed" ||
+                        currentStatus === "error"
                     ) {
                         clearInterval(intervalId);
-                        // Send them to Download, passing the final data!
-                        navigate("/download", {
-                            state: { report: statusData },
-                        });
-                    }
-                    // If the backend says the workflow crashed:
-                    else if (statusData.status === "failed") {
-                        clearInterval(intervalId);
                         setStatusText(
-                            "Report generation failed on the server. Please try again.",
+                            `Report generation failed: ${statusData.error || "Unknown error on server."}`,
                         );
-                    }
-                    // Otherwise, just keep waiting!
-                    else {
+                    } else {
                         setStatusText(
-                            statusData.message ||
-                                "Still analyzing... please wait.",
+                            `Analyzing... ${currentStatus} (${statusData.progress || 0}%)`,
                         );
                     }
                 }
@@ -61,7 +96,7 @@ const Loading = () => {
             }
         }, 3000);
 
-        return () => clearInterval(intervalId); // Cleanup if user leaves page
+        return () => clearInterval(intervalId);
     }, [navigate, reportId]);
 
     return (

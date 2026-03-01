@@ -1,38 +1,61 @@
-import React, { useEffect, useCallback } from "react";
+import React, { useEffect, useCallback, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 const Download = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    
+
     const finalReportData = location.state?.report;
+
+    // 1. Create a "memory" flag to stop the double-download
+    const hasDownloaded = useRef(false);
 
     const handleDownload = useCallback(() => {
         if (!finalReportData) return;
 
         const fileData = JSON.stringify(finalReportData, null, 2);
-        
         const blob = new Blob([fileData], { type: "application/json" });
         const url = URL.createObjectURL(blob);
 
         const link = document.createElement("a");
         link.href = url;
-        link.download = "PoliCity_Infrastructure_Report.json"; 
+        link.download = "PoliCity_Infrastructure_Report.json";
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-    }, [finalReportData]); 
+    }, [finalReportData]);
 
     useEffect(() => {
-        if (finalReportData) {
+        // 2. Only trigger the download if we have data AND haven't done it yet!
+        if (finalReportData && !hasDownloaded.current) {
             handleDownload();
+            hasDownloaded.current = true; // 3. Flip the switch so it never runs again
         }
     }, [finalReportData, handleDownload]);
-    
+
     if (!finalReportData) {
         return (
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "80vh" }}>
-                <button onClick={() => navigate("/")} style={{ padding: "12px 25px", fontSize: "16px", fontWeight: "bold", backgroundColor: "#3498db", color: "white", border: "none", borderRadius: "8px", cursor: "pointer" }}>
+            <div
+                style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    minHeight: "80vh",
+                }}
+            >
+                <button
+                    onClick={() => navigate("/")}
+                    style={{
+                        padding: "12px 25px",
+                        fontSize: "16px",
+                        fontWeight: "bold",
+                        backgroundColor: "#3498db",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "8px",
+                        cursor: "pointer",
+                    }}
+                >
                     Return to Map
                 </button>
             </div>
@@ -40,17 +63,50 @@ const Download = () => {
     }
 
     return (
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "80vh", padding: "20px" }}>
-            <div style={{ backgroundColor: "white", padding: "40px", borderRadius: "12px", boxShadow: "0 4px 15px rgba(0,0,0,0.1)", textAlign: "center", width: "100%", maxWidth: "500px" }}>
-                <h2 style={{ color: "#2c3e50", marginTop: 0 }}>Report Generated Successfully!</h2>
-                
-                <p style={{ color: "#7f8c8d", marginBottom: "15px", fontSize: "16px" }}>
+        <div
+            style={{
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                minHeight: "80vh",
+                padding: "20px",
+            }}
+        >
+            <div
+                style={{
+                    backgroundColor: "white",
+                    padding: "40px",
+                    borderRadius: "12px",
+                    boxShadow: "0 4px 15px rgba(0,0,0,0.1)",
+                    textAlign: "center",
+                    width: "100%",
+                    maxWidth: "500px",
+                }}
+            >
+                <h2 style={{ color: "#2c3e50", marginTop: 0 }}>
+                    Report Generated Successfully!
+                </h2>
+
+                <p
+                    style={{
+                        color: "#7f8c8d",
+                        marginBottom: "15px",
+                        fontSize: "16px",
+                    }}
+                >
                     Your download should have started automatically.
                 </p>
-                <p style={{ color: "#95a5a6", marginBottom: "30px", fontSize: "14px" }}>
-                    If it didn't, or if you need to download it again, click the button below:
+                <p
+                    style={{
+                        color: "#95a5a6",
+                        marginBottom: "30px",
+                        fontSize: "14px",
+                    }}
+                >
+                    If it didn't, or if you need to download it again, click the
+                    button below:
                 </p>
-                
+
                 <button
                     onClick={handleDownload}
                     style={{

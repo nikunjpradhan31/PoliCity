@@ -207,7 +207,13 @@ const CityMap = () => {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        city: city,
+                        // These MUST match the Python Pydantic model exactly!
+                        location: city,
+                        issue_type: "General Infrastructure", // Or dynamically set this based on the map points
+                        fiscal_year: new Date().getFullYear(), // Automatically sends the current year (e.g., 2024/2025)
+
+                        // Note: We are still sending the raw map points just in case your backend
+                        // eventually wants to use them, but Pydantic will safely ignore them for now!
                         issues: reportData,
                     }),
                 },
