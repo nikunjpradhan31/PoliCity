@@ -7,6 +7,7 @@ import Home from "./pages/Home";
 import CityMap from "./pages/CityMap";
 import Loading from "./pages/Loading";
 import Download from "./pages/Download";
+import bg from "./assets/background.svg";
 
 export default function App() {
     return (
@@ -15,7 +16,10 @@ export default function App() {
                 style={{
                     fontFamily: "sans-serif",
                     minHeight: "100vh",
-                    backgroundColor: "#F0F7EE",
+                    backgroundImage: `url(${bg})`,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                    backgroundRepeat: "no-repeat",
                 }}
             >
                 <Header />
