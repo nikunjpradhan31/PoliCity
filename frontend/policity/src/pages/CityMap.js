@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import "../animations.css";
 import {
     MapContainer,
     TileLayer,
@@ -10,10 +11,11 @@ import {
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
-const MapPoint = ({ position, summary, type }) => {
+const MapPoint = ({ point, onGenerate }) => {
     const GOOGLE_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-    const [lat, lng] = position;
+    const [lat, lng] = point.position;
     const streetViewUrl = `https://www.google.com/maps/embed/v1/streetview?key=${GOOGLE_API_KEY}&location=${lat},${lng}`;
+
     const getColor = (classification) => {
         switch (classification?.toLowerCase()) {
             case "parking":
@@ -35,11 +37,11 @@ const MapPoint = ({ position, summary, type }) => {
 
     return (
         <CircleMarker
-            center={position}
+            center={point.position}
             radius={8}
             pathOptions={{
-                color: getColor(type),
-                fillColor: getColor(type),
+                color: getColor(point.type),
+                fillColor: getColor(point.type),
                 fillOpacity: 0.7,
                 weight: 2,
             }}
@@ -49,7 +51,7 @@ const MapPoint = ({ position, summary, type }) => {
                 minWidth={340}
                 maxWidth={400}
                 minHeight={200}
-                maxHeight={400}
+                maxHeight={450}
             >
                 <div
                     style={{
@@ -58,8 +60,13 @@ const MapPoint = ({ position, summary, type }) => {
                         padding: "5px",
                     }}
                 >
-                    <strong style={{ color: getColor(type), fontSize: "16px" }}>
-                        {type ? type.toUpperCase() : "UNKNOWN"}
+                    <strong
+                        style={{
+                            color: getColor(point.type),
+                            fontSize: "16px",
+                        }}
+                    >
+                        {point.type ? point.type.toUpperCase() : "UNKNOWN"}
                     </strong>
                     <p
                         style={{
@@ -71,13 +78,14 @@ const MapPoint = ({ position, summary, type }) => {
                             padding: "0 10px",
                         }}
                     >
-                        {summary || "No description provided."}
+                        {point.summary || "No description provided."}
                     </p>
                     <div
                         style={{
                             borderRadius: "8px",
                             overflow: "hidden",
                             border: "1px solid #ccc",
+                            marginBottom: "10px",
                         }}
                     >
                         <iframe
@@ -87,9 +95,28 @@ const MapPoint = ({ position, summary, type }) => {
                             loading="lazy"
                             allowFullScreen
                             src={streetViewUrl}
-                            title={`Street view of ${type}`}
+                            title={`Street view of ${point.type}`}
                         ></iframe>
                     </div>
+
+                    <button
+                        onClick={() => onGenerate(point)}
+                        className="btn-hover"
+                        style={{
+                            padding: "8px 15px",
+                            fontSize: "14px",
+                            fontWeight: "bold",
+                            backgroundColor: getColor(point.type),
+                            color: "white",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                            width: "100%",
+                            boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                        }}
+                    >
+                        Generate Report for this {point.type}
+                    </button>
                 </div>
             </Popup>
         </CircleMarker>
@@ -114,13 +141,11 @@ const MapBoundsTracker = ({ onBoundsChange }) => {
 const ChangeMapView = ({ center }) => {
     const map = useMap();
 
-    // Wrap the map movement in a useEffect so it doesn't cause an infinite loop!
     useEffect(() => {
         if (center) {
-            // Pro-tip: flyTo adds a really smooth panning animation instead of a hard jump
             map.flyTo(center, 13);
         }
-    }, [center, map]); // Only re-run this if 'center' coordinates change
+    }, [center, map]);
 
     return null;
 };
@@ -135,7 +160,6 @@ const CityMap = () => {
 
     const [isGenerating, setIsGenerating] = useState(false);
 
-    // Fetch coordinates for the searched city
     useEffect(() => {
         fetch(
             `https://nominatim.openstreetmap.org/search?format=json&q=${city}`,
@@ -154,7 +178,6 @@ const CityMap = () => {
             .catch((err) => console.error("Error fetching city data:", err));
     }, [city]);
 
-    // Fetch data from FastAPI when map moves
     const fetchMapData = useCallback(async (bounds) => {
         const params = new URLSearchParams({
             long_1: bounds.leftLng,
@@ -165,7 +188,6 @@ const CityMap = () => {
         });
 
         try {
-            // NOTE: Ensure your FastAPI server is running on port 8000!
             const response = await fetch(
                 `http://localhost:8000/api/v1/issues/bounds?${params.toString()}`,
             );
@@ -175,12 +197,11 @@ const CityMap = () => {
 
             const rawBackendData = await response.json();
 
-            // Map the Python variables to the React component variables
             const formattedPoints = rawBackendData.map((issue) => ({
                 id: issue.id,
                 type: issue.classification,
-                position: [issue.latitude, issue.longitude], // Leaflet needs this as an array
-                summary: issue.description || issue.address, // Fallback to address if no description
+                position: [issue.latitude, issue.longitude],
+                summary: issue.description || issue.address,
             }));
 
             setReportData(formattedPoints);
@@ -189,7 +210,6 @@ const CityMap = () => {
         }
     }, []);
 
-    // Handle Generate Report Button
     const handleGenerateReport = async () => {
         if (reportData.length === 0) {
             alert(
@@ -198,7 +218,42 @@ const CityMap = () => {
             return;
         }
 
-        setIsGenerating(true); // Disable button to prevent double-clicks!
+        setIsGenerating(true);
+
+        try {
+            const visibleIncidentIds = reportData.map((point) => point.id);
+
+            const response = await fetch(
+                "http://localhost:8000/api/v1/workflow/infrastructure-report/bulk",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        incident_ids: visibleIncidentIds,
+                        fiscal_year: new Date().getFullYear(),
+                    }),
+                },
+            );
+
+            if (!response.ok) throw new Error("Failed to start bulk workflow");
+
+            const data = await response.json();
+
+            navigate("/loading", {
+                state: { reportId: data.report_id || data.id },
+            });
+        } catch (error) {
+            console.error("Error starting bulk report:", error);
+            alert(
+                "Could not start the report generation. Check if the backend is running!",
+            );
+        } finally {
+            setIsGenerating(false);
+        }
+    };
+
+    const handleGenerateSingleReport = async (point) => {
+        setIsGenerating(true);
 
         try {
             const response = await fetch(
@@ -207,28 +262,24 @@ const CityMap = () => {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        // These MUST match the Python Pydantic model exactly!
                         location: city,
-                        issue_type: "General Infrastructure", // Or dynamically set this based on the map points
-                        fiscal_year: new Date().getFullYear(), // Automatically sends the current year (e.g., 2024/2025)
-
-                        // Note: We are still sending the raw map points just in case your backend
-                        // eventually wants to use them, but Pydantic will safely ignore them for now!
-                        issues: reportData,
+                        issue_type: point.type || "General Infrastructure",
+                        fiscal_year: new Date().getFullYear(),
+                        issues: [point],
                     }),
                 },
             );
 
-            if (!response.ok) throw new Error("Failed to start workflow");
+            if (!response.ok)
+                throw new Error("Failed to start single workflow");
 
             const data = await response.json();
 
-            // (Make sure 'report_id' matches whatever your Python model calls it)
             navigate("/loading", {
                 state: { reportId: data.report_id || data.id },
             });
         } catch (error) {
-            console.error("Error starting report:", error);
+            console.error("Error starting single report:", error);
             alert(
                 "Could not start the report generation. Check if the backend is running!",
             );
@@ -291,7 +342,6 @@ const CityMap = () => {
                             boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
                         }}
                     >
-                        {/* If coords are null, show a loading message. If they exist, draw the map! */}
                         {!coords ? (
                             <div
                                 style={{
@@ -319,7 +369,10 @@ const CityMap = () => {
                                 style={{ height: "100%", width: "100%" }}
                             >
                                 <ChangeMapView center={coords} />
-                                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                                <TileLayer
+                                    url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                                />
 
                                 <MapBoundsTracker
                                     onBoundsChange={fetchMapData}
@@ -328,9 +381,8 @@ const CityMap = () => {
                                 {reportData.map((point) => (
                                     <MapPoint
                                         key={point.id}
-                                        position={point.position}
-                                        summary={point.summary}
-                                        type={point.type}
+                                        point={point}
+                                        onGenerate={handleGenerateSingleReport}
                                     />
                                 ))}
                             </MapContainer>
@@ -341,11 +393,12 @@ const CityMap = () => {
                 <button
                     onClick={handleGenerateReport}
                     disabled={isGenerating}
+                    className="btn-hover"
                     style={{
                         padding: "12px 25px",
                         fontSize: "16px",
                         fontWeight: "bold",
-                        backgroundColor: isGenerating ? "#bdc3c7" : "#b084cc", // Grays out when clicked
+                        backgroundColor: isGenerating ? "#bdc3c7" : "#b084cc",
                         color: "white",
                         border: "none",
                         borderRadius: "8px",

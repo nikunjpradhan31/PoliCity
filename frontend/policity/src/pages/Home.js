@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import '../animations.css'
 
 const Home = () => {
     const [city, setCity] = useState("");
@@ -11,13 +12,13 @@ const Home = () => {
         if (city.trim() !== "") {
             const formattedCity = city
                 .trim()
-                .split(/\s+/) // Splits the string by one or more spaces
+                .split(/\s+/)
                 .map(
                     (word) =>
                         word.charAt(0).toUpperCase() +
                         word.toLowerCase().slice(1),
                 )
-                .join(" "); // Joins the words back together with a single space
+                .join(" ");
 
             navigate("/map", { state: { city: formattedCity } });
         }
@@ -78,6 +79,7 @@ const Home = () => {
                     />
                     <button
                         type="submit"
+                        className="btn-hover"
                         style={{
                             padding: "12px 15px",
                             fontSize: "16px",

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import "../animations.css";
 
 const Loading = () => {
     const navigate = useNavigate();
@@ -22,7 +23,6 @@ const Loading = () => {
 
         const intervalId = setInterval(async () => {
             try {
-                // 1. POLL THE STATUS ENDPOINT
                 const statusRes = await fetch(
                     `http://localhost:8000/api/v1/workflow/infrastructure-report/${reportId}`,
                 );
@@ -33,7 +33,6 @@ const Loading = () => {
                         statusData.status || ""
                     ).toLowerCase();
 
-                    // 2. IF IT IS FINISHED...
                     if (
                         currentStatus === "complete" ||
                         currentStatus === "completed" ||
@@ -42,18 +41,23 @@ const Loading = () => {
                         clearInterval(intervalId); // Stop polling immediately!
                         setStatusText("Finalizing report... fetching details.");
 
-                        // 3. FETCH THE ACTUAL FINAL REPORT DATA
                         try {
-                            const incidentId = statusData.incident_id;
+                            // Check if the backend gave us a real incident ID, otherwise fallback to the reportId!
+                            const finalIdToFetch =
+                                statusData.incident_id &&
+                                statusData.incident_id !== "MULTIPLE"
+                                    ? statusData.incident_id
+                                    : reportId;
 
-                            if (!incidentId) {
+                            if (!finalIdToFetch) {
                                 throw new Error(
-                                    "Backend finished, but no incident_id was provided.",
+                                    "Backend finished, but no valid ID was provided to fetch the final data.",
                                 );
                             }
 
+                            // Fetch the final data using our safely calculated ID
                             const finalReportRes = await fetch(
-                                `http://localhost:8000/api/v1/workflow/infrastructure-report/incident/${incidentId}`,
+                                `http://localhost:8000/api/v1/workflow/infrastructure-report/incident/${finalIdToFetch}`,
                             );
 
                             if (!finalReportRes.ok) {
@@ -64,7 +68,6 @@ const Loading = () => {
 
                             const finalReportData = await finalReportRes.json();
 
-                            // 4. HAND THE FINAL DATA OFF TO THE DOWNLOAD PAGE
                             navigate("/download", {
                                 state: { report: finalReportData },
                             });
@@ -109,7 +112,9 @@ const Loading = () => {
                 padding: "20px",
             }}
         >
+            {/* Added slide-up-card class */}
             <div
+                className="slide-up-card"
                 style={{
                     backgroundColor: "white",
                     padding: "50px",
@@ -120,10 +125,14 @@ const Loading = () => {
                     maxWidth: "500px",
                 }}
             >
+                <div className="spinner"></div>
+
                 <h2 style={{ color: "#2c3e50", marginTop: 0 }}>
                     Generating your PoliCity report...
                 </h2>
+
                 <p
+                    className="pulse-text"
                     style={{
                         fontSize: "18px",
                         color: "#7f8c8d",
