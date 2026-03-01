@@ -13,7 +13,8 @@ from app.services.mongo import (
 from app.db import get_collection
 
 from app.agents.thinking import ThinkingAgent
-from app.agents.report_gen import ReportGeneratorAgent, GraphGeneratorAgent
+from app.agents.report_gen import ReportGeneratorAgent
+from app.agents.graph import GraphGeneratorAgent
 
 class InfrastructureWorkflow:
     def __init__(self):
