@@ -201,7 +201,7 @@ class MultiInfrastructureWorkflow:
             {
                 "pipeline_run": incident["pipeline_run"], 
                 "progress": 100, 
-                "report_url": f"/api/v1/workflow/infrastructure-report/{report_id}/pdf" # ✅ And here!
+                "report_url": f"/api/v1/workflow/infrastructure-report/{report_id}/pdf"
             }
         )
 
