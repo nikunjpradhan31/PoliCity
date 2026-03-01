@@ -17,6 +17,8 @@ class ThinkingAgent(AgentBase):
         issue_type = inputs.get("issue_type", "Unknown issue")
         location = inputs.get("location", "Unknown location")
         fiscal_year = inputs.get("fiscal_year", 2025)
+        issue_metadata = inputs.get("issue_data", {})
+        issue_metadata_str = json.dumps(issue_metadata, default=str)
 
         prompt = f"""
         You are the Thinking Agent for a Multi-Agent Infrastructure Reporting Workflow.
@@ -27,6 +29,7 @@ class ThinkingAgent(AgentBase):
         - Issue Type: {issue_type}
         - Location: {location}
         - Fiscal Year: {fiscal_year}
+        - Issue Metadata: {issue_metadata_str}
 
         Analyze the severity, infer the geospatial coordinates/neighborhood for {location}, estimate material/labor costs, define repair phases, list potential real-world contractors in the area, and analyze the fiscal year budget and grant opportunities.
         
