@@ -74,7 +74,7 @@ def generateGraphData(report_content, Graph):
         REPORT:
         {report_content}
         """,
-        model = "gemini-2.5-flash",
+        model = "gemini-2.5-flash-lite",
         config={
             "response_mime_type": "application/json",
             "response_schema": Graph,
@@ -119,7 +119,7 @@ def generateReport(report_content, Report):
         REPORT:
         {report_content}
         """,
-        model = "gemini-2.5-flash",
+        model = "gemini-2.5-flash-lite",
         config={
             "response_mime_type": "application/json",
             "response_schema": Report,

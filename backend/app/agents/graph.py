@@ -101,7 +101,7 @@ class GraphGeneratorAgent(AgentBase):
             REPORT:
             {thinking_output_str}
             """,
-            model = "gemini-2.5-flash",
+            model = "gemini-2.5-flash-lite",
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=Graph,

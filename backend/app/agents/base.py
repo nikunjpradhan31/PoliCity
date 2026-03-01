@@ -14,7 +14,7 @@ class AgentBase:
         if not self.api_key:
             print(f"Warning: GOOGLE_API_KEY not set for {self.name}")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
-        self.model_name = "gemini-2.5-flash"  # using a known fast model
+        self.model_name = "gemini-2.5-flash-lite"  # using a known fast model
 
     async def run(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Runs the agent and returns standard envelope output."""
