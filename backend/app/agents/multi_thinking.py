@@ -1,4 +1,5 @@
 import json
+import asyncio
 from typing import Dict, Any
 from google import genai
 from google.genai import types
@@ -60,7 +61,8 @@ class MultiThinkingAgent(AgentBase):
             raise RuntimeError("Gemini API key is not configured.")
 
         try:
-            response = self.client.models.generate_content(
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
                 model=self.model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(

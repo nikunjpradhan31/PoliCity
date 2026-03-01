@@ -1,4 +1,5 @@
 import json
+import asyncio
 from typing import Dict, Any
 from google import genai
 from google.genai import types
@@ -63,10 +64,9 @@ class ThinkingAgent(AgentBase):
         if not self.client:
             raise RuntimeError("Gemini API key is not configured.")
 
-        # Optional: Add Google Search grounding if the API supports it
-        # We'll just ask the model to generate JSON directly.
         try:
-            response = self.client.models.generate_content(
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
                 model=self.model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
@@ -75,10 +75,9 @@ class ThinkingAgent(AgentBase):
                 )
             )
             
-            # The response.text should be valid JSON
             text = response.text.strip()
             data = json.loads(text)
             return data
+            
         except Exception as e:
-            # Fallback or pass error up
             raise Exception(f"Failed to generate Thinking Agent output: {str(e)}")

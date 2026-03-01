@@ -1,6 +1,10 @@
 import uuid
+import asyncio
+import json
 from datetime import datetime
 from typing import Dict, Any, List
+from bson.objectid import ObjectId
+from bson.errors import InvalidId
 
 from app.services.mongo import (
     get_incident,
@@ -32,14 +36,9 @@ class MultiInfrastructureWorkflow:
         incident_ids = request_data.get("incident_ids", [])
         force_refresh = request_data.get("force_refresh", [])
         
-        # Generate a unified report ID for this batch
         report_id = f"MULTI-INC-{datetime.utcnow().strftime('%Y%m%d')}-000{uuid.uuid4().hex[:4]}"
 
         collection = get_collection("seeclickfix_issues")
-        
-        from bson.objectid import ObjectId
-        from bson.errors import InvalidId
-        import json
 
         incidents_data = []
         for i_id in incident_ids:
@@ -48,7 +47,8 @@ class MultiInfrastructureWorkflow:
             except InvalidId:
                 query_id = i_id
                 
-            doc = collection.find_one({"_id": query_id})
+            doc = await asyncio.to_thread(collection.find_one, {"_id": query_id})
+            
             if doc:
                 doc["incident_id"] = str(doc["_id"])
                 del doc["_id"]
@@ -80,7 +80,6 @@ class MultiInfrastructureWorkflow:
         }
         await save_incident(report_id, incident)
 
-        import asyncio
         asyncio.create_task(self._run_agents(report_id, request_data, force_refresh, incident))
 
         return {

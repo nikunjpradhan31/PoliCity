@@ -1,6 +1,10 @@
 import uuid
+import asyncio
+import json
 from datetime import datetime
 from typing import Dict, Any, List
+from bson.objectid import ObjectId
+from bson.errors import InvalidId
 
 from app.services.mongo import (
     get_incident,
@@ -28,9 +32,6 @@ class InfrastructureWorkflow:
         """
         Initiates or resumes a workflow.
         Returns initial status response.
-        In a real background tasks setup, the actual execution happens asynchronously.
-        Here we run it but you might want to yield or launch it via asyncio.create_task.
-        For simplicity, we will run it inline or assume it is run via background_tasks in route.
         """
         incident_id = request_data.get("incident_id")
         force_refresh = request_data.get("force_refresh", [])
@@ -56,25 +57,25 @@ class InfrastructureWorkflow:
 
         collection = get_collection("seeclickfix_issues")
         
-        from bson.objectid import ObjectId
-        from bson.errors import InvalidId
         try:
             query_id = ObjectId(incident_id)
         except InvalidId:
             query_id = incident_id
             
-        doc = collection.find_one({"_id": query_id})
+        # ✅ FIX: Shoved the synchronous PyMongo call into a background thread!
+        doc = await asyncio.to_thread(collection.find_one, {"_id": query_id})
+        
         if not doc:
             doc = {}
         else: 
             doc["incident_id"] = str(doc["_id"])
             del doc["_id"]
             
-            import json
             # Convert non-JSON types (like datetime) to strings so it remains a "json data type"
             doc = json.loads(json.dumps(doc, default=str))
             
         request_data["issue_data"] = doc
+        
         # Initialize incident if new
         if not incident:
             incident = {
@@ -100,15 +101,7 @@ class InfrastructureWorkflow:
             }
             await save_incident(incident_id, incident)
 
-        # In a typical setup, we'd spawn a background task for `_run_agents`.
-        # To avoid blocking, we will spawn it using asyncio if we can, 
-        # but since FastAPI uses await, returning here and letting background task run is best.
-        # But we don't have the background task passed directly inside start_pipeline easily.
-        # Actually, `routes.py` expects `start_pipeline` to return response, and maybe `start_pipeline` starts the background task?
-        # Let's just execute it and return once started. Oh, `routes.py` does:
-        # response = await workflow.start_pipeline(request.model_dump())
-        # We can run it directly for now, or use asyncio.create_task
-        import asyncio
+        # Spawn the background task without blocking the return
         asyncio.create_task(self._run_agents(incident_id, request_data, force_refresh, incident))
 
         return {
