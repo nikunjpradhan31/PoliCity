@@ -195,14 +195,13 @@ class MultiInfrastructureWorkflow:
         incident["pipeline_run"]["completed_at"] = end_time.isoformat() + "Z"
         incident["pipeline_run"]["total_duration_ms"] = duration
         
-        # update incident
         await update_incident_status(
             report_id, 
             "complete", 
             {
                 "pipeline_run": incident["pipeline_run"], 
                 "progress": 100, 
-                "report_url": f"/api/v1/workflow/infrastructure-report/{report_id}/download"
+                "report_url": f"/api/v1/workflow/infrastructure-report/{report_id}/pdf"
             }
         )
 
@@ -262,7 +261,7 @@ class MultiInfrastructureWorkflow:
 
         report_out = await get_agent_output(self.agent_collections["multi_report"], incident_id)
         graph_doc = await get_agent_output(
-            self.agent_collections["graph"],
+            self.agent_collections["graph_agent"],
             incident_id
         )
 

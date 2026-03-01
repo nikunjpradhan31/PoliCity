@@ -55,6 +55,7 @@ class MultiReportGeneratorAgent(AgentBase):
             raise RuntimeError("Gemini API key is not configured.")
 
         try:
+            print("[DEBUG] Sending data to Report Agent Gemini...")
             response = await asyncio.to_thread(
                 self.client.models.generate_content,
                 model=self.model_name,
@@ -64,9 +65,20 @@ class MultiReportGeneratorAgent(AgentBase):
                     response_mime_type="application/json"
                 )
             )
+            print("[DEBUG] Received response from Report Agent Gemini!")
             
             text = response.text.strip()
-            data = json.loads(text)
+            
+            if text.startswith("```json"):
+                text = text[7:]
+            elif text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+                
+            data = json.loads(text.strip())
             return data
+            
         except Exception as e:
+            print(f"[ERROR] MultiReportGeneratorAgent crashed: {str(e)}")
             raise Exception(f"Failed to generate Multi-Report Agent output: {str(e)}")

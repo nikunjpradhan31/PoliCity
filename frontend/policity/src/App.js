@@ -27,7 +27,7 @@ export default function App() {
                     <Route path="/" element={<Home />} />
                     <Route path="/map" element={<CityMap />} />
                     <Route path="/loading" element={<Loading />} />
-                    <Route path="/download" element={<Download />} />
+                    <Route path="/pdf" element={<Download />} />
                 </Routes>
             </div>
         </Router>
